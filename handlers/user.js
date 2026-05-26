@@ -76,19 +76,29 @@ async function handleProDays(bot, chatId, days) {
     reply_markup: proceedPayment()
   });
 
-  updateSession(chatId, { plan: 'pro', promoDays: days });
+  // setSession must come BEFORE updateSession — setSession resets data:{} and would wipe promoDays/plan
   setSession(chatId, 'awaiting_payment');
+  updateSession(chatId, { plan: 'pro', promoDays: days });
 }
 
 async function proceedWithPaymentForPro(bot, chatId, user) {
   const session = getSession(chatId);
+  if (!session || !session.data) {
+    return bot.sendMessage(chatId, '❌ Session expired. Please start over from the main menu.');
+  }
+
   const days = session.data.promoDays;
+  if (!days || isNaN(days) || days <= 0) {
+    return bot.sendMessage(chatId, '❌ Could not read your selected days. Please start over.');
+  }
+
   const settings = await Settings.findOne() || new Settings();
   const pricePerDay = settings.proPricePerDay || 1000;
 
   await initiatePayment(bot, chatId, user, days, pricePerDay);
 
   setSession(chatId, 'awaiting_payment_confirmation');
+  updateSession(chatId, { plan: 'pro', promoDays: days });
 }
 
 // After payment confirmed, start product form
@@ -149,7 +159,7 @@ async function handleProductFormStep(bot, chatId, text) {
       setSession(chatId, 'sell_product_price');
       return bot.sendMessage(chatId, '💰 What is your asking price? (₦)');
 
-    case 'sell_product_price':
+    case 'sell_product_price': {
       const price = parseInt(text);
       if (isNaN(price) || price <= 0) {
         return bot.sendMessage(chatId, '❌ Please enter a valid number.');
@@ -157,8 +167,9 @@ async function handleProductFormStep(bot, chatId, text) {
       updateSession(chatId, { productPrice: price });
       setSession(chatId, 'sell_product_lastprice');
       return bot.sendMessage(chatId, '💸 What is your lowest/last price? (₦)');
+    }
 
-    case 'sell_product_lastprice':
+    case 'sell_product_lastprice': {
       const lastPrice = parseInt(text);
       if (isNaN(lastPrice) || lastPrice <= 0) {
         return bot.sendMessage(chatId, '❌ Please enter a valid number.');
@@ -173,6 +184,7 @@ async function handleProductFormStep(bot, chatId, text) {
 
       await showProductSummary(bot, chatId);
       return;
+    }
   }
 }
 
@@ -218,6 +230,9 @@ async function submitProductToAdmin(bot, chatId, user) {
   const session = getSession(chatId);
   const d = session.data;
 
+  const settings = await Settings.findOne() || new Settings();
+  const pricePerDay = settings.proPricePerDay || 1000;
+
   const submission = new SellerSubmission({
     telegramId: user.telegramId,
     firstName: user.firstName,
@@ -233,7 +248,7 @@ async function submitProductToAdmin(bot, chatId, user) {
     lastPrice: d.productLastPrice,
     plan: d.plan,
     premiumDays: d.plan === 'pro' ? d.promoDays : 0,
-    premiumPrice: d.plan === 'pro' ? (d.promoDays * 1000) : 0,
+    premiumPrice: d.plan === 'pro' ? (d.promoDays * pricePerDay) : 0,
     paymentStatus: d.plan === 'pro' ? 'paid' : 'not_needed',
     approvalStatus: 'pending'
   });
