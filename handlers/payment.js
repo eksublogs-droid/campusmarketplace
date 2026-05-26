@@ -108,6 +108,12 @@ async function handlePaymentSent(bot, chatId, ref, user, onSuccess) {
 }
 
 async function handleReverify(bot, chatId, ref, user, onSuccess) {
+  // Clear any existing interval for this ref to prevent stacking
+  if (activePayments[ref]) {
+    clearInterval(activePayments[ref].interval);
+    delete activePayments[ref];
+  }
+
   const verifyMsg = await bot.sendMessage(chatId,
     `⏳ *Reverifying payment...*\n\n⏱ Checking in *40* seconds...`,
     { parse_mode: 'Markdown' }
@@ -130,6 +136,7 @@ async function handleReverify(bot, chatId, ref, user, onSuccess) {
 
   setTimeout(async () => {
     clearInterval(interval);
+    if (activePayments[ref]) delete activePayments[ref];
 
     const tx = await verifyPayment(ref);
     if (tx) {
@@ -164,6 +171,8 @@ async function handleReverify(bot, chatId, ref, user, onSuccess) {
       } catch (_) {}
     }
   }, 40000);
+
+  activePayments[ref] = { interval, chatId };
 }
 
 module.exports = { initiatePayment, handlePaymentSent, handleReverify };
