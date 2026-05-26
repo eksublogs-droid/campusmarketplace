@@ -77,12 +77,10 @@ async function checkUserReady(bot, chatId, user) {
   return true;
 }
 
-
 // ========== TESTER RESET (ID: 6511973707 only) ==========
 bot.onText(/^\/reset$/, async (msg) => {
   const chatId = msg.chat.id;
   if (String(chatId) !== '6511973707') return;
-
   await User.deleteOne({ telegramId: chatId });
   await bot.sendMessage(chatId, '🗑 Your account has been wiped. Send /start to begin fresh.');
 });
@@ -121,10 +119,7 @@ bot.onText(/^\/start(.*)/, async (msg) => {
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text || '';
-
-  // /start is handled by onText — skip here to prevent double-firing
   if (text.startsWith('/start')) return;
-
   const user = await User.findOne({ telegramId: chatId });
 
   if (!user) return;
@@ -164,10 +159,7 @@ bot.on('message', async (msg) => {
   }
 
   if (!user.verified) {
-    // Don't re-show button 1 — just remind them to tap the verify button
-    if (user.notifiedAdmin) {
-      await showVerificationStep(bot, chatId, user);
-    }
+    await showVerificationStep(bot, chatId, user);
     return;
   }
 
