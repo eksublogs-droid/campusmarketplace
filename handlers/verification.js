@@ -26,10 +26,10 @@ async function handleGmailInput(bot, chatId, text, user) {
   await showVerificationStep(bot, chatId, user);
 }
 
-// Show verification wall — Step 1: only show "Save Our Number & Notify Us" button
+// Show verification wall — Step 1: only "Save Our Number & Notify Us" button
 async function showVerificationStep(bot, chatId, user) {
   const sent = await bot.sendMessage(chatId,
-    `📱 *One Last Step — Get Verified*\n\nTo unlock the marketplace, tap the button below.\n\nIt will open Telegram with a message already typed for you — just hit *Send*.\n\nOnce you've sent the message, tap *"Click Here to Get Verified"* to complete the process ✅`,
+    `📱 *One Last Step — Get Verified*\n\nTo unlock the marketplace, tap the button below.\n\nIt will open Telegram with a message already typed for you — just hit *Send*.\n\nOnce you've sent the message, come back to the bot to Get Verified to complete the process ✅`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -44,25 +44,29 @@ async function showVerificationStep(bot, chatId, user) {
   setSession(chatId, { step: 'awaiting_verification', verifyMsgId: sent.message_id });
 }
 
-// Handle "Save Our Number & Notify Us" tap — open Telegram, swap button to deeplink
+// Handle "Save Our Number & Notify Us" tap — swap button then open Telegram
 async function handleSaveNumberCallback(bot, chatId, query, user) {
   const deepLink = buildVerifyDeepLink(user.telegramId);
   const waLink = verifyContactLink(process.env.ADMIN_TELEGRAM_NUMBER, user);
 
   const messageId = query.message.message_id;
 
-  // Answer callback with URL — opens Telegram chat to @EksuBlog
-  await bot.answerCallbackQuery(query.id, { url: waLink });
+  // 1. Edit the markup first — swap to the deeplink "Click Here to Get Verified" button
+  try {
+    await bot.editMessageReplyMarkup(
+      {
+        inline_keyboard: [
+          [{ text: '✅ Click Here to Get Verified', url: deepLink }]
+        ]
+      },
+      { chat_id: chatId, message_id: messageId }
+    );
+  } catch (e) {
+    // Non-fatal — markup may already be updated if user tapped twice
+  }
 
-  // Edit the original message: swap button to the deeplink "Click Here to Get Verified"
-  await bot.editMessageReplyMarkup(
-    {
-      inline_keyboard: [
-        [{ text: '✅ Click Here to Get Verified', url: deepLink }]
-      ]
-    },
-    { chat_id: chatId, message_id: messageId }
-  );
+  // 2. Answer the callback with the Telegram URL — this is what actually opens @EksuBlog
+  await bot.answerCallbackQuery(query.id, { url: waLink });
 }
 
 // Handle deep link return: start=verified_TELEGRAMID_CODE
