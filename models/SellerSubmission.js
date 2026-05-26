@@ -16,7 +16,7 @@ const sellerSubmissionSchema = new mongoose.Schema({
   plan: { type: String, enum: ['free', 'pro'], default: 'free' },
   premiumDays: { type: Number, default: 0 },
   premiumPrice: { type: Number, default: 0 },
-  paymentStatus: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' },
+  paymentStatus: { type: String, enum: ['pending', 'paid', 'failed', 'not_needed'], default: 'pending' },
   paymentRef: { type: String, default: '' },
   approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   rejectionReason: { type: String, default: '' },
