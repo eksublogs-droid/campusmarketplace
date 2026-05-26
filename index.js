@@ -23,15 +23,18 @@ const {
 const { getSession, setSession, updateSession, clearSession } = require('./utils/session');
 const { checkExpiringProPlans, demoteExpiredProPlans } = require('./utils/cron');
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const app = express();
 app.use(express.json());
 
 // ========== MONGODB CONNECTION ==========
 mongoose.connect(process.env.MONGODB_URI).then(() => {
   console.log('✅ MongoDB connected');
+  bot.startPolling();
+  console.log('✅ Bot polling started');
 }).catch(err => {
   console.error('❌ MongoDB error:', err.message);
+  process.exit(1);
 });
 
 // ========== HELPER ==========
@@ -77,7 +80,7 @@ async function checkUserReady(bot, chatId, user) {
 // ========== START COMMAND ==========
 bot.onText(/^\/start(.*)/, async (msg) => {
   const chatId = msg.chat.id;
-  const param = msg.match[1]?.trim();
+  const param = msg.match?.[1]?.trim();
 
   const user = await getOrCreateUser(chatId, msg);
 
