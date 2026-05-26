@@ -52,8 +52,12 @@ async function showVerificationStep(bot, chatId, user) {
 
     setSession(chatId, 'awaiting_verification');
   } else {
-    // They already tapped button 1 — show button 2 only
-    await showVerifyButton(bot, chatId, user);
+    // They already tapped button 1 — show button 2 only if not already sent
+    if (!user.verifyButtonSent) {
+      await showVerifyButton(bot, chatId, user);
+      user.verifyButtonSent = true;
+      await user.save();
+    }
   }
 }
 
