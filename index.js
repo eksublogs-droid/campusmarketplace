@@ -110,6 +110,10 @@ bot.onText(/^\/start(.*)/, async (msg) => {
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text || '';
+
+  // /start is handled by onText — skip here to prevent double-firing
+  if (text.startsWith('/start')) return;
+
   const user = await User.findOne({ telegramId: chatId });
 
   if (!user) return;
@@ -149,7 +153,10 @@ bot.on('message', async (msg) => {
   }
 
   if (!user.verified) {
-    await showVerificationStep(bot, chatId, user);
+    // Don't re-show button 1 — just remind them to tap the verify button
+    if (user.notifiedAdmin) {
+      await showVerificationStep(bot, chatId, user);
+    }
     return;
   }
 
@@ -435,4 +442,3 @@ bot.on('polling_error', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
-    
