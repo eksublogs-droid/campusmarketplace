@@ -1,4 +1,4 @@
-const { createVirtualAccount, verifyPayment, generateRef } = require('../utils/flutterwave');
+const { createVirtualAccount, verifyPayment, generateRef } = require('../utils/monnify');
 const { emailPaymentConfirmed } = require('../utils/email');
 const { setSession, updateSession, getSession } = require('../utils/session');
 
@@ -19,11 +19,15 @@ async function initiatePayment(bot, chatId, user, days, pricePerDay) {
     }
     accountData = result.data;
   } catch (err) {
-    console.error('FLW account error:', err.message);
+    console.error('Monnify account error:', err.message);
     return bot.sendMessage(chatId, '❌ Payment service error. Please try again later.');
   }
 
-  updateSession(chatId, { paymentRef: ref, paymentDays: days, paymentAmount: amount });
+  updateSession(chatId, {
+    paymentRef: accountData.transactionReference || ref,
+    paymentDays: days,
+    paymentAmount: amount
+  });
 
   await bot.sendMessage(chatId,
     `🏦 *Payment Details*\n` +
@@ -37,14 +41,13 @@ async function initiatePayment(bot, chatId, user, days, pricePerDay) {
     {
       parse_mode: 'Markdown',
       reply_markup: {
-        inline_keyboard: [[{ text: '✅ I Have Sent The Money', callback_data: `payment_sent_${ref}` }]]
+        inline_keyboard: [[{ text: '✅ I Have Sent The Money', callback_data: `payment_sent_${accountData.transactionReference || ref}` }]]
       }
     }
   );
 }
 
 async function handlePaymentSent(bot, chatId, ref, user, onSuccess) {
-  // Send verifying message with countdown
   const sentMsg = await bot.sendMessage(chatId,
     `⏳ *Verifying payment...*\n\n⏱ Checking in *40* seconds...`,
     { parse_mode: 'Markdown' }
@@ -53,7 +56,6 @@ async function handlePaymentSent(bot, chatId, ref, user, onSuccess) {
   const msgId = sentMsg.message_id;
   let secondsLeft = 40;
 
-  // Countdown timer — update message every 5 seconds
   const interval = setInterval(async () => {
     secondsLeft -= 5;
     if (secondsLeft > 0) {
@@ -66,7 +68,6 @@ async function handlePaymentSent(bot, chatId, ref, user, onSuccess) {
     }
   }, 5000);
 
-  // After 40 seconds, check payment
   setTimeout(async () => {
     clearInterval(interval);
     if (activePayments[ref]) delete activePayments[ref];
@@ -81,7 +82,6 @@ async function handlePaymentSent(bot, chatId, ref, user, onSuccess) {
         );
       } catch (_) {}
 
-      // Send email receipt
       const days = getSession(chatId)?.data?.paymentDays || 1;
       const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
       await emailPaymentConfirmed(user.gmail, user.firstName, tx.amount, days, expiresAt);
@@ -108,7 +108,6 @@ async function handlePaymentSent(bot, chatId, ref, user, onSuccess) {
 }
 
 async function handleReverify(bot, chatId, ref, user, onSuccess) {
-  // Clear any existing interval for this ref to prevent stacking
   if (activePayments[ref]) {
     clearInterval(activePayments[ref].interval);
     delete activePayments[ref];
