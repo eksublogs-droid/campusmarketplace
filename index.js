@@ -70,16 +70,22 @@ async function checkUserReady(bot, chatId, user) {
   }
 
   if (!user.verified) {
-    // Only show verification step if button hasn't been sent yet
-    // This prevents spamming button 2 on every /start tap
-    if (!user.verifyButtonSent) {
-      await showVerificationStep(bot, chatId, user);
-    }
+    await showVerificationStep(bot, chatId, user);
     return false;
   }
 
   return true;
 }
+
+
+// ========== TESTER RESET (ID: 6511973707 only) ==========
+bot.onText(/^\/reset$/, async (msg) => {
+  const chatId = msg.chat.id;
+  if (String(chatId) !== '6511973707') return;
+
+  await User.deleteOne({ telegramId: chatId });
+  await bot.sendMessage(chatId, '🗑 Your account has been wiped. Send /start to begin fresh.');
+});
 
 // ========== START COMMAND ==========
 bot.onText(/^\/start(.*)/, async (msg) => {
@@ -92,7 +98,6 @@ bot.onText(/^\/start(.*)/, async (msg) => {
   if (param && param.startsWith('verified_')) {
     const verified = await handleVerifyDeepLink(bot, chatId, param);
     if (verified) {
-      // Re-fetch user so we have the updated verified=true state
       const freshUser = await User.findOne({ telegramId: chatId });
       return await showMainMenu(bot, chatId, freshUser);
     }
