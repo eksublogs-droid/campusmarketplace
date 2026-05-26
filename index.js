@@ -149,6 +149,7 @@ bot.on('message', async (msg) => {
   }
 
   if (!user.verified) {
+    await showVerificationStep(bot, chatId, user);
     return;
   }
 
@@ -434,3 +435,4 @@ bot.on('polling_error', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
+    
