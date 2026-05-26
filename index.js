@@ -88,7 +88,10 @@ bot.onText(/^\/reset$/, async (msg) => {
 // ========== START COMMAND ==========
 bot.onText(/^\/start(.*)/, async (msg) => {
   const chatId = msg.chat.id;
-  const param = msg.match?.[1]?.trim();
+
+  // FIX: extract param directly from msg.text to avoid leading-space issue
+  // with regex capture groups when Telegram appends deep link params.
+  const param = (msg.text || '').replace(/^\/start\s*/, '').trim();
 
   const user = await getOrCreateUser(chatId, msg);
 
