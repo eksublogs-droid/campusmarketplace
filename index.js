@@ -232,9 +232,6 @@ bot.on('callback_query', async (query) => {
   // Admin check
   const adminMode = isAdmin(chatId);
 
-    return;
-  }
-
   // ===== MAIN MENU =====
   if (data === 'main_menu') {
     return await showMainMenu(bot, chatId, user);
