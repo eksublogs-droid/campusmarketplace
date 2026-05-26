@@ -9,9 +9,10 @@ function buyerInterestedLink(adminWhatsapp, product, user, readyToBuy) {
   return buildWhatsappLink(adminWhatsapp, msg);
 }
 
-function verifyContactLink(adminNumber, user) {
-  const msg = `Hi! I'd like to get verified on the Campus Marketplace bot 🙏\n\nName: ${user.firstName} ${user.lastName}\nUsername: @${user.username || 'N/A'}\nTelegram ID: ${user.telegramId}`;
-  return `https://t.me/EksuBlog?text=${encodeURIComponent(msg)}`;
+function verifyContactLink() {
+  // Opens @EksuBlog chat directly — Telegram does not support pre-filled
+  // text for non-bot usernames, so we just open the chat
+  return `https://t.me/EksuBlog`;
 }
 
 module.exports = { buildWhatsappLink, buyerInterestedLink, verifyContactLink };
