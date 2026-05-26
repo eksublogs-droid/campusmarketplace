@@ -16,13 +16,21 @@ async function createVirtualAccount(user, amount, ref) {
     narration: `CampusMarketplace ${user.firstName}`
   };
 
-  const response = await axios.post(
-    'https://api.flutterwave.com/v3/virtual-account-numbers',
-    payload,
-    { headers: { Authorization: `Bearer ${process.env.FLW_SECRET_KEY}` } }
-  );
+  console.log('FLW payload:', JSON.stringify(payload));
 
-  return response.data;
+  try {
+    const response = await axios.post(
+      'https://api.flutterwave.com/v3/virtual-account-numbers',
+      payload,
+      { headers: { Authorization: `Bearer ${process.env.FLW_SECRET_KEY}` } }
+    );
+    console.log('FLW response:', JSON.stringify(response.data));
+    return response.data;
+  } catch (err) {
+    const detail = err.response ? JSON.stringify(err.response.data) : err.message;
+    console.error('FLW account error detail:', detail);
+    throw err;
+  }
 }
 
 async function verifyPayment(ref) {
