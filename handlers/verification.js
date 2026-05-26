@@ -26,47 +26,27 @@ async function handleGmailInput(bot, chatId, text, user) {
   await showVerificationStep(bot, chatId, user);
 }
 
-// Show verification wall — Step 1: only "Save Our Number & Notify Us" button
+// Show verification wall — both buttons shown at once
+// Button 1 (url): opens @EksuBlog with pre-typed message
+// Button 2 (url): deeplink back to bot to complete verification
 async function showVerificationStep(bot, chatId, user) {
-  const sent = await bot.sendMessage(chatId,
+  const deepLink = buildVerifyDeepLink(user.telegramId);
+  const waLink = verifyContactLink(process.env.ADMIN_TELEGRAM_NUMBER, user);
+
+  await bot.sendMessage(chatId,
     `📱 *One Last Step — Get Verified*\n\nTo unlock the marketplace, tap the button below.\n\nIt will open Telegram with a message already typed for you — just hit *Send*.\n\nOnce you've sent the message, come back to the bot to Get Verified to complete the process ✅`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📲 Save Our Number & Notify Us', callback_data: 'save_number' }]
+          [{ text: '📲 Save Our Number & Notify Us', url: waLink }],
+          [{ text: '✅ Click Here to Get Verified', url: deepLink }]
         ]
       }
     }
   );
 
-  // Store message_id so we can edit it after the button is tapped
-  setSession(chatId, { step: 'awaiting_verification', verifyMsgId: sent.message_id });
-}
-
-// Handle "Save Our Number & Notify Us" tap — swap button then open Telegram
-async function handleSaveNumberCallback(bot, chatId, query, user) {
-  const deepLink = buildVerifyDeepLink(user.telegramId);
-  const waLink = verifyContactLink(process.env.ADMIN_TELEGRAM_NUMBER, user);
-
-  const messageId = query.message.message_id;
-
-  // 1. Edit the markup first — swap to the deeplink "Click Here to Get Verified" button
-  try {
-    await bot.editMessageReplyMarkup(
-      {
-        inline_keyboard: [
-          [{ text: '✅ Click Here to Get Verified', url: deepLink }]
-        ]
-      },
-      { chat_id: chatId, message_id: messageId }
-    );
-  } catch (e) {
-    // Non-fatal — markup may already be updated if user tapped twice
-  }
-
-  // 2. Answer the callback with the Telegram URL — this is what actually opens @EksuBlog
-  await bot.answerCallbackQuery(query.id, { url: waLink });
+  setSession(chatId, 'awaiting_verification');
 }
 
 // Handle deep link return: start=verified_TELEGRAMID_CODE
@@ -77,13 +57,16 @@ async function handleVerifyDeepLink(bot, chatId, param) {
   const { telegramId, code } = parsed;
   const expectedCode = generateVerifyCode(telegramId);
 
-  if (String(telegramId) !== String(chatId) || code !== expectedCode) {
+  if (Number(telegramId) !== Number(chatId) || code !== expectedCode) {
     await bot.sendMessage(chatId, '❌ Invalid verification link. Please try again.');
     return false;
   }
 
-  const user = await User.findOne({ telegramId });
-  if (!user) return false;
+  const user = await User.findOne({ telegramId: Number(telegramId) });
+  if (!user) {
+    await bot.sendMessage(chatId, '❌ Account not found. Please restart with /start.');
+    return false;
+  }
 
   user.verified = true;
   await user.save();
@@ -97,4 +80,4 @@ async function handleVerifyDeepLink(bot, chatId, param) {
   return true;
 }
 
-module.exports = { askGmail, handleGmailInput, showVerificationStep, handleSaveNumberCallback, handleVerifyDeepLink };
+module.exports = { askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink };
