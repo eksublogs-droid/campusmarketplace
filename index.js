@@ -70,7 +70,11 @@ async function checkUserReady(bot, chatId, user) {
   }
 
   if (!user.verified) {
-    await showVerificationStep(bot, chatId, user);
+    // Only show verification step if button hasn't been sent yet
+    // This prevents spamming button 2 on every /start tap
+    if (!user.verifyButtonSent) {
+      await showVerificationStep(bot, chatId, user);
+    }
     return false;
   }
 
@@ -88,7 +92,9 @@ bot.onText(/^\/start(.*)/, async (msg) => {
   if (param && param.startsWith('verified_')) {
     const verified = await handleVerifyDeepLink(bot, chatId, param);
     if (verified) {
-      return await showMainMenu(bot, chatId, user);
+      // Re-fetch user so we have the updated verified=true state
+      const freshUser = await User.findOne({ telegramId: chatId });
+      return await showMainMenu(bot, chatId, freshUser);
     }
     return;
   }
