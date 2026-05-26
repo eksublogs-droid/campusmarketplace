@@ -6,4 +6,4 @@ const settingsSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model('Settings', settingsSchema);
+module.exports = mongoose.models['Settings'] || mongoose.model('Settings', settingsSchema);
