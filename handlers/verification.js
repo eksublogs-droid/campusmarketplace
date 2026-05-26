@@ -1,6 +1,5 @@
 const User = require('../models/User');
 const { buildVerifyDeepLink, parseVerifyDeepLink, generateVerifyCode } = require('../utils/deeplink');
-const { verifyContactLink } = require('../utils/whatsapp');
 const { setSession, clearSession } = require('../utils/session');
 
 async function askGmail(bot, chatId, firstName) {
@@ -23,30 +22,51 @@ async function handleGmailInput(bot, chatId, text, user) {
 }
 
 async function showVerificationStep(bot, chatId, user) {
+  const deepLink = buildVerifyDeepLink(user.telegramId);
+
   if (!user.notifiedAdmin) {
-    // First time — show button 1 only
-    const waLink = verifyContactLink();
+    // Message 1 — instructions + message us button
     await bot.sendMessage(chatId,
-      `📱 *One Last Step — Get Verified*\n\nTo unlock the marketplace, tap the button below.\n\nIt will open Telegram with a message already typed for you — just hit *Send*.\n\nOnce you've sent the message, come back to the bot to Get Verified to complete the process ✅`,
+      `📱 *One Last Step — Get Verified*\n\n` +
+      `To access the marketplace, you *MUST* follow these steps in order:\n\n` +
+      `1️⃣ Tap the button below to message us\n` +
+      `2️⃣ Save our contact\n` +
+      `3️⃣ Send us a message saying *"Saved your contact"*`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '📲 Save Our Number & Notify Us', url: waLink }]
+            [{ text: '📲 Message Us on Telegram', url: 'https://t.me/EksuBlog' }]
           ]
         }
       }
     );
+
+    // Message 2 — warning + verify button
+    await bot.sendMessage(chatId,
+      `⚠️ *WARNING: Do NOT tap the button below until you have messaged us first\\!*\n\n` +
+      `If you tap it without messaging us first, you will *NOT* be verified\\!\n\n` +
+      `Once you've messaged us, come back and tap below ✅`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ Click Here to Get Verified', url: deepLink }]
+          ]
+        }
+      }
+    );
+
     user.notifiedAdmin = true;
     await user.save();
     setSession(chatId, 'awaiting_verification');
+
   } else {
-    // Already tapped button 1 — show button 2
-    const deepLink = buildVerifyDeepLink(user.telegramId);
+    // They came back — just show the verify button
     await bot.sendMessage(chatId,
-      `✅ *Just one more tap to complete your verification:*`,
+      `👋 *Welcome back\\!*\n\nIf you've already messaged us, tap below to complete your verification ✅`,
       {
-        parse_mode: 'Markdown',
+        parse_mode: 'MarkdownV2',
         reply_markup: {
           inline_keyboard: [
             [{ text: '✅ Click Here to Get Verified', url: deepLink }]
