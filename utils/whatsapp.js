@@ -10,8 +10,8 @@ function buyerInterestedLink(adminWhatsapp, product, user, readyToBuy) {
 }
 
 function verifyContactLink(adminNumber, user) {
-  const msg = `Hi! I just saved your number ✅ Please verify me — ${user.firstName} | @${user.username || 'N/A'} | ID: ${user.telegramId}`;
-  return `https://t.me/${adminNumber.replace('+', '')}?text=${encodeURIComponent(msg)}`;
+  const msg = `Hi! I'd like to get verified on the Campus Marketplace bot 🙏\n\nName: ${user.firstName} ${user.lastName}\nUsername: @${user.username || 'N/A'}\nTelegram ID: ${user.telegramId}`;
+  return `https://t.me/EksuBlog?text=${encodeURIComponent(msg)}`;
 }
 
 module.exports = { buildWhatsappLink, buyerInterestedLink, verifyContactLink };
