@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const { buildVerifyDeepLink, parseVerifyDeepLink, generateVerifyCode } = require('../utils/deeplink');
 const { verifyContactLink } = require('../utils/whatsapp');
-const { setSession, getSession, clearSession } = require('../utils/session');
+const { setSession, clearSession } = require('../utils/session');
 
 // Step 1: Ask for Gmail
 async function askGmail(bot, chatId, firstName) {
@@ -12,7 +12,7 @@ async function askGmail(bot, chatId, firstName) {
   setSession(chatId, 'awaiting_gmail');
 }
 
-// Step 2: Save Gmail and ask for number verification
+// Step 2: Save Gmail and show verification step
 async function handleGmailInput(bot, chatId, text, user) {
   const gmail = text.trim().toLowerCase();
   if (!/^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(gmail)) {
@@ -26,48 +26,47 @@ async function handleGmailInput(bot, chatId, text, user) {
   await showVerificationStep(bot, chatId, user);
 }
 
-// Show verification wall — checks session to decide which step to show
+// Show verification wall
+// - If user hasn't notified admin yet → show button 1 (url to @EksuBlog)
+// - If user already tapped button 1 (notifiedAdmin=true) → show button 2 (deeplink)
 async function showVerificationStep(bot, chatId, user) {
-  const session = getSession(chatId);
+  if (!user.notifiedAdmin) {
+    // First time — show only "Save Our Number & Notify Us"
+    const waLink = verifyContactLink(process.env.ADMIN_TELEGRAM_NUMBER, user);
 
-  // If they've already seen step 1 and came back, show the deeplink button
-  if (session && session.step === 'awaiting_verification_step2') {
-    return await showVerifyButton(bot, chatId, user);
+    await bot.sendMessage(chatId,
+      `📱 *One Last Step — Get Verified*\n\nTo unlock the marketplace, tap the button below.\n\nIt will open Telegram with a message already typed for you — just hit *Send*.\n\nOnce you've sent the message, come back to the bot to Get Verified to complete the process ✅`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📲 Save Our Number & Notify Us', url: waLink }]
+          ]
+        }
+      }
+    );
+
+    // Mark that they've seen step 1 — persists across bot restarts
+    user.notifiedAdmin = true;
+    await user.save();
+
+    setSession(chatId, 'awaiting_verification');
+  } else {
+    // They already tapped step 1 — show the deeplink button
+    const deepLink = buildVerifyDeepLink(user.telegramId);
+
+    await bot.sendMessage(chatId,
+      `✅ *Just one more tap to complete your verification:*`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ Click Here to Get Verified', url: deepLink }]
+          ]
+        }
+      }
+    );
   }
-
-  // First time — show only "Save Our Number & Notify Us" url button
-  const waLink = verifyContactLink(process.env.ADMIN_TELEGRAM_NUMBER, user);
-
-  await bot.sendMessage(chatId,
-    `📱 *One Last Step — Get Verified*\n\nTo unlock the marketplace, tap the button below.\n\nIt will open Telegram with a message already typed for you — just hit *Send*.\n\nOnce you've sent the message, come back to the bot to Get Verified to complete the process ✅`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '📲 Save Our Number & Notify Us', url: waLink }]
-        ]
-      }
-    }
-  );
-
-  setSession(chatId, 'awaiting_verification_step2');
-}
-
-// Step 2 — shown when user comes back after messaging @EksuBlog
-async function showVerifyButton(bot, chatId, user) {
-  const deepLink = buildVerifyDeepLink(user.telegramId);
-
-  await bot.sendMessage(chatId,
-    `✅ *Great! Now tap below to complete your verification:*`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '✅ Click Here to Get Verified', url: deepLink }]
-        ]
-      }
-    }
-  );
 }
 
 // Handle deep link return: start=verified_TELEGRAMID_CODE
