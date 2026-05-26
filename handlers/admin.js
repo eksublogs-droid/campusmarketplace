@@ -85,7 +85,7 @@ async function handleAdminAddProductStep(bot, chatId, text) {
 
 async function handleAdminMediaUpload(bot, chatId, file_id, mediaType) {
   const session = getSession(chatId);
-  if (!session || !session.step.includes('media')) {
+  if (!session || !session.step || !session.step.includes('media')) {
     return bot.sendMessage(chatId, '❌ Not in the right step.');
   }
 
