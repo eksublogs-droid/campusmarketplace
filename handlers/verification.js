@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const { buildVerifyDeepLink, parseVerifyDeepLink, generateVerifyCode } = require('../utils/deeplink');
 const { verifyContactLink } = require('../utils/whatsapp');
-const { setSession, clearSession } = require('../utils/session');
+const { setSession, getSession, clearSession } = require('../utils/session');
 
 // Step 1: Ask for Gmail
 async function askGmail(bot, chatId, firstName) {
@@ -26,11 +26,16 @@ async function handleGmailInput(bot, chatId, text, user) {
   await showVerificationStep(bot, chatId, user);
 }
 
-// Show verification wall — both buttons shown at once
-// Button 1 (url): opens @EksuBlog with pre-typed message
-// Button 2 (url): deeplink back to bot to complete verification
+// Show verification wall — checks session to decide which step to show
 async function showVerificationStep(bot, chatId, user) {
-  const deepLink = buildVerifyDeepLink(user.telegramId);
+  const session = getSession(chatId);
+
+  // If they've already seen step 1 and came back, show the deeplink button
+  if (session && session.step === 'awaiting_verification_step2') {
+    return await showVerifyButton(bot, chatId, user);
+  }
+
+  // First time — show only "Save Our Number & Notify Us" url button
   const waLink = verifyContactLink(process.env.ADMIN_TELEGRAM_NUMBER, user);
 
   await bot.sendMessage(chatId,
@@ -39,14 +44,30 @@ async function showVerificationStep(bot, chatId, user) {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📲 Save Our Number & Notify Us', url: waLink }],
-          [{ text: '✅ Click Here to Get Verified', url: deepLink }]
+          [{ text: '📲 Save Our Number & Notify Us', url: waLink }]
         ]
       }
     }
   );
 
-  setSession(chatId, 'awaiting_verification');
+  setSession(chatId, 'awaiting_verification_step2');
+}
+
+// Step 2 — shown when user comes back after messaging @EksuBlog
+async function showVerifyButton(bot, chatId, user) {
+  const deepLink = buildVerifyDeepLink(user.telegramId);
+
+  await bot.sendMessage(chatId,
+    `✅ *Great! Now tap below to complete your verification:*`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '✅ Click Here to Get Verified', url: deepLink }]
+        ]
+      }
+    }
+  );
 }
 
 // Handle deep link return: start=verified_TELEGRAMID_CODE
