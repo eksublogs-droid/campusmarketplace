@@ -5,11 +5,15 @@ async function createVirtualAccount(user, amount, ref) {
   const payload = {
     email: user.gmail,
     is_permanent: false,
-    bvn: '22222222222', // placeholder — Flutterwave requires BVN for some accounts; use your business BVN
+    bvn: '22650878518',
     tx_ref: ref,
     amount,
     currency: 'NGN',
-    narration: `Marketplace Pro Plan - ${user.firstName}`
+    phonenumber: '08107517052',
+    firstname: 'CampusMarketplace',
+    lastname: user.firstName,
+    preferred_bank: 'wema bank',
+    narration: `CampusMarketplace ${user.firstName}`
   };
 
   const response = await axios.post(
