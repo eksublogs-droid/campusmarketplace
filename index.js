@@ -8,7 +8,7 @@ const User = require('./models/User');
 const Product = require('./models/Product');
 
 // Handlers
-const { askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink } = require('./handlers/verification');
+const { askGmail, handleGmailInput, showVerificationStep, handleSaveNumberCallback, handleVerifyDeepLink } = require('./handlers/verification');
 const { showMainMenu, handleBuyFlow, startSellFlow, handlePlanSelection, handleProDays, proceedWithPaymentForPro, startProductForm, handleProductFormStep, handleMediaUpload, submitProductToAdmin } = require('./handlers/user');
 const { handlePaymentSent, handleReverify } = require('./handlers/payment');
 const { showProducts, searchProducts } = require('./handlers/product');
@@ -231,6 +231,12 @@ bot.on('callback_query', async (query) => {
 
   // Admin check
   const adminMode = isAdmin(chatId);
+
+  // ===== VERIFICATION STEP 2: swap button to deeplink =====
+  if (data === 'save_number') {
+    await handleSaveNumberCallback(bot, chatId, query, user);
+    return;
+  }
 
   // ===== MAIN MENU =====
   if (data === 'main_menu') {
