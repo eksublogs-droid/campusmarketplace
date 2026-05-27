@@ -17,7 +17,6 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     premiumExpiresAt = new Date(Date.now() + submission.premiumDays * 24 * 60 * 60 * 1000);
   }
 
-  // Map ALL submission fields into Product
   const product = new Product({
     name:             submission.productName,
     media:            submission.media || [],
@@ -56,40 +55,66 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
 
   await product.save();
 
-  // Build full detail message for seller
-  const neg = submission.negotiable
-    ? `Yes (Min: ₦${(submission.lowestPrice || 0).toLocaleString()})`
-    : 'No';
   const warranty = submission.warrantyRemaining === 'yes'
     ? (submission.warrantyDuration || 'Yes')
     : (submission.warrantyRemaining || 'N/A');
 
+  // Delivery descriptions in layman terms
+  const deliveryParts = [];
+  if (submission.doorDropoff) deliveryParts.push('Door Dropoff (seller brings it to your door)');
+  if (submission.doorPickup)  deliveryParts.push('Door Pickup (you pick it up from seller\'s location)');
+  const deliveryText = deliveryParts.length ? deliveryParts.join(' & ') : 'Not specified';
+
+  const approvalMsg =
+    `🎉 *Your product has been approved!*\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📦 *${submission.productName}*\n` +
+    `🗂 Category   : ${submission.category}\n` +
+    `📁 Subcategory: ${submission.subcategory}\n` +
+    `🏷 Brand      : ${submission.brand || 'N/A'}\n` +
+    `⚙️ Condition  : ${submission.condition}\n` +
+    `📄 Description: ${submission.description || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⏱ Used For   : ${submission.usedDuration || 'N/A'}\n` +
+    `🔧 Defects    : ${submission.hasDefects ? (submission.defectsDetails || 'Yes') : 'None'}\n` +
+    `🛠 Repairs    : ${submission.wasRepaired ? (submission.repairsDetails || 'Yes') : 'None'}\n` +
+    `❓ Reason     : ${submission.reasonForSelling || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📍 State      : ${submission.state}\n` +
+    `🏙 City       : ${submission.city}\n` +
+    `🚚 Delivery   : ${deliveryText}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🧾 Receipt    : ${submission.receiptAvailable || 'N/A'}\n` +
+    `🛡 Warranty   : ${warranty}\n` +
+    `📦 Packaging  : ${submission.originalPackaging || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `Your listing is now *live* and visible to all buyers. You'll start receiving inquiries on WhatsApp soon!`;
+
+  // Send approval message with media as album
   try {
-    await bot.sendMessage(submission.telegramId,
-      `🎉 *Your product has been approved!*\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `📦 *${submission.productName}*\n` +
-      `🗂 Category : ${submission.category}\n` +
-      `📁 Subcategory: ${submission.subcategory}\n` +
-      `🏷 Brand    : ${submission.brand || 'N/A'}\n` +
-      `⚙️ Condition: ${submission.condition}\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `💰 Selling Price: ₦${(submission.sellingPrice || 0).toLocaleString()}\n` +
-      `🤝 Negotiable   : ${neg}\n` +
-      `⏱ Used For     : ${submission.usedDuration || 'N/A'}\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `📍 State    : ${submission.state}\n` +
-      `🏙 City     : ${submission.city}\n` +
-      `🚚 Door Dropoff: ${submission.doorDropoff ? 'Yes' : 'No'}\n` +
-      `🚶 Door Pickup : ${submission.doorPickup ? 'Yes' : 'No'}\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🧾 Receipt  : ${submission.receiptAvailable || 'N/A'}\n` +
-      `🛡 Warranty : ${warranty}\n` +
-      `📦 Packaging: ${submission.originalPackaging || 'N/A'}\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `Your listing is now *live* and visible to all buyers. You'll start receiving inquiries on WhatsApp soon!`,
-      { parse_mode: 'Markdown' }
-    );
+    if (submission.media && submission.media.length > 0) {
+      if (submission.media.length === 1) {
+        const m = submission.media[0];
+        if (m.type === 'video') {
+          await bot.sendVideo(submission.telegramId, m.file_id, { caption: approvalMsg, parse_mode: 'Markdown' });
+        } else {
+          await bot.sendPhoto(submission.telegramId, m.file_id, { caption: approvalMsg, parse_mode: 'Markdown' });
+        }
+      } else {
+        const mediaGroup = submission.media.slice(0, 10).map((m, i) => ({
+          type: m.type === 'video' ? 'video' : 'photo',
+          media: m.file_id,
+          ...(i === 0 ? { caption: approvalMsg, parse_mode: 'Markdown' } : {})
+        }));
+        await bot.sendMediaGroup(submission.telegramId, mediaGroup);
+        await bot.sendMessage(submission.telegramId,
+          `✅ Your listing is now live! You'll start receiving buyer inquiries on WhatsApp soon.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    } else {
+      await bot.sendMessage(submission.telegramId, approvalMsg, { parse_mode: 'Markdown' });
+    }
   } catch (err) {
     console.error(`Notify seller ${submission.telegramId} failed:`, err.message);
   }
