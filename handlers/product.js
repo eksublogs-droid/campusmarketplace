@@ -29,9 +29,7 @@ async function sendProductCard(bot, chatId, product, user, settings) {
   if (product.brand)      lines.push(`🏷 Brand    : ${product.brand}`);
   if (product.condition)  lines.push(`⚙️ Condition: ${product.condition}`);
   if (product.usedDuration) lines.push(`⏱ Used For : ${product.usedDuration}`);
-  lines.push(`💰 Price    : ₦${product.price.toLocaleString()}${product.negotiable ? ' (Negotiable)' : ''}`);
-  if (product.negotiable && product.lowestPrice)
-    lines.push(`📉 Lowest   : ₦${product.lowestPrice.toLocaleString()}`);
+  lines.push(`💰 Price    : *Tap a button below to enquire*`);
 
   const loc = [product.city, product.state].filter(Boolean).join(', ') || product.location;
   if (loc) lines.push(`📍 Location : ${loc}`);
