@@ -135,17 +135,32 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
 
   await emailApproved(submission.gmail, submission.firstName, submission.productName, process.env.BOT_USERNAME);
 
-  // Fire broadcast in background — do not await, so admin gets instant confirmation
-  broadcastProduct(bot, product).catch(err => console.error('Broadcast error:', err.message));
+  // Send admin confirmation FIRST — always, before broadcast
+  try {
+    await bot.sendMessage(adminChatId,
+      `✅ *Submission Approved*\n\n` +
+      `📦 ${submission.productName}\n` +
+      `👤 Seller: ${submission.firstName}\n` +
+      `📧 Email sent to seller\n` +
+      `📢 Broadcasting to all users now...`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) {
+    console.error('Admin approval confirmation failed:', err.message);
+  }
 
-  await bot.sendMessage(adminChatId,
-    `✅ *Submission Approved*\n\n` +
-    `📦 ${submission.productName}\n` +
-    `👤 Seller: ${submission.firstName}\n` +
-    `📧 Email sent to seller\n` +
-    `📢 Broadcasted to all users`,
-    { parse_mode: 'Markdown' }
-  );
+  // Fire broadcast in background — never await, never crash the flow
+  broadcastProduct(bot, product)
+    .then(result => {
+      bot.sendMessage(adminChatId,
+        `📢 *Broadcast Complete*\n✅ Sent: ${result.successCount}\n❌ Failed: ${result.failCount}`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    })
+    .catch(err => {
+      console.error('Broadcast error:', err.message);
+      bot.sendMessage(adminChatId, `⚠️ Broadcast encountered an error: ${err.message}`).catch(() => {});
+    });
 }
 
 async function rejectSellerSubmission(bot, submissionId, adminChatId, reason) {
@@ -172,13 +187,17 @@ async function rejectSellerSubmission(bot, submissionId, adminChatId, reason) {
 
   await emailRejected(submission.gmail, submission.firstName, submission.productName, reason);
 
-  await bot.sendMessage(adminChatId,
-    `❌ *Submission Rejected*\n\n` +
-    `📦 ${submission.productName}\n` +
-    `👤 Seller: ${submission.firstName}\n` +
-    `📧 Email sent with rejection reason`,
-    { parse_mode: 'Markdown' }
-  );
+  try {
+    await bot.sendMessage(adminChatId,
+      `❌ *Submission Rejected*\n\n` +
+      `📦 ${submission.productName}\n` +
+      `👤 Seller: ${submission.firstName}\n` +
+      `📧 Email sent with rejection reason`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) {
+    console.error('Admin rejection confirmation failed:', err.message);
+  }
 }
 
 module.exports = { approveSellerSubmission, rejectSellerSubmission };
