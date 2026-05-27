@@ -37,8 +37,8 @@ async function sendProductCard(bot, chatId, product, user, settings) {
   if (loc) lines.push(`📍 Location : ${loc}`);
 
   const delivery = [];
-  if (product.doorDropoff) delivery.push('Door Dropoff');
-  if (product.doorPickup)  delivery.push('Door Pickup');
+  if (product.doorDropoff) delivery.push('Door Dropoff (seller brings it to you)');
+  if (product.doorPickup)  delivery.push('Door Pickup (you collect from seller)');
   if (delivery.length)    lines.push(`🚚 Delivery : ${delivery.join(' & ')}`);
 
   if (product.receiptAvailable && product.receiptAvailable !== 'no')
