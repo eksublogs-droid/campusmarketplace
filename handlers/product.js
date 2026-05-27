@@ -15,40 +15,81 @@ async function getSettings() {
 }
 
 async function sendProductCard(bot, chatId, product, user, settings) {
-  const waNum = product.whatsappNumber || settings.defaultWhatsapp;
-  const waLink = buyerInterestedLink(waNum, product, user, false);
+  // Always use admin default WhatsApp, not the product's stored number
+  const waNum = settings.defaultWhatsapp;
+  const waLink      = buyerInterestedLink(waNum, product, user, false);
   const waLinkReady = buyerInterestedLink(waNum, product, user, true);
 
   const badge = product.isPremium ? '💎 PRO  |  ' : '';
-  const caption =
-    `${badge}📦 *${product.name}*\n` +
-    `💰 Price: ₦${product.price.toLocaleString()}\n` +
-    `📍 Location: ${product.location}\n` +
-    `📝 ${product.details}\n` +
-    `📄 ${product.description}`;
+
+  // Build full caption
+  const lines = [];
+  lines.push(`${badge}📦 *${product.name}*`);
+  if (product.category)   lines.push(`🗂 Category : ${product.category}${product.subcategory ? ' › ' + product.subcategory : ''}`);
+  if (product.brand)      lines.push(`🏷 Brand    : ${product.brand}`);
+  if (product.condition)  lines.push(`⚙️ Condition: ${product.condition}`);
+  if (product.usedDuration) lines.push(`⏱ Used For : ${product.usedDuration}`);
+  lines.push(`💰 Price    : ₦${product.price.toLocaleString()}${product.negotiable ? ' (Negotiable)' : ''}`);
+  if (product.negotiable && product.lowestPrice)
+    lines.push(`📉 Lowest   : ₦${product.lowestPrice.toLocaleString()}`);
+
+  const loc = [product.city, product.state].filter(Boolean).join(', ') || product.location;
+  if (loc) lines.push(`📍 Location : ${loc}`);
+
+  const delivery = [];
+  if (product.doorDropoff) delivery.push('Door Dropoff');
+  if (product.doorPickup)  delivery.push('Door Pickup');
+  if (delivery.length)    lines.push(`🚚 Delivery : ${delivery.join(' & ')}`);
+
+  if (product.receiptAvailable && product.receiptAvailable !== 'no')
+    lines.push(`🧾 Receipt  : Available`);
+  if (product.warrantyRemaining === 'yes')
+    lines.push(`🛡 Warranty : ${product.warrantyDuration || 'Yes'}`);
+  if (product.originalPackaging && product.originalPackaging !== 'no')
+    lines.push(`📦 Packaging: Available`);
+
+  if (product.hasDefects)
+    lines.push(`⚠️ Defects  : ${product.defectsDetails || 'Yes'}`);
+  if (product.wasRepaired)
+    lines.push(`🔧 Repaired : ${product.repairsDetails || 'Yes'}`);
+  if (product.description)
+    lines.push(`\n📝 ${product.description}`);
+
+  const caption = lines.join('\n');
 
   const keyboard = {
     inline_keyboard: [
       [{ text: '👀 Interested — Not Ready to Buy', url: waLink }],
-      [{ text: '✅ Interested & Ready to Buy', url: waLinkReady }]
+      [{ text: '✅ Interested & Ready to Buy',      url: waLinkReady }]
     ]
   };
 
   if (product.media && product.media.length > 0) {
-    const first = product.media[0];
     try {
-      if (first.type === 'video') {
-        await bot.sendVideo(chatId, first.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
+      if (product.media.length === 1) {
+        // Single media: attach caption + buttons directly
+        const m = product.media[0];
+        if (m.type === 'video') {
+          await bot.sendVideo(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
+        } else {
+          await bot.sendPhoto(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
+        }
       } else {
-        await bot.sendPhoto(chatId, first.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
-      }
-      // Send remaining media without caption
-      for (let i = 1; i < product.media.length; i++) {
-        const m = product.media[i];
-        if (m.type === 'video') await bot.sendVideo(chatId, m.file_id);
-        else await bot.sendPhoto(chatId, m.file_id);
+        // Multiple media: send as album first, then caption+buttons as text
+        const mediaGroup = product.media.slice(0, 10).map((m, i) => ({
+          type: m.type === 'video' ? 'video' : 'photo',
+          media: m.file_id,
+          ...(i === 0 ? { caption, parse_mode: 'Markdown' } : {})
+        }));
+        await bot.sendMediaGroup(chatId, mediaGroup);
+        // Send buttons as follow-up text
+        await bot.sendMessage(chatId, `👆 *${product.name}*\nTap a button below to contact the seller:`, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard
+        });
       }
     } catch (err) {
+      // Fallback to text-only if media fails
       await bot.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
     }
   } else {
@@ -60,9 +101,7 @@ async function showProducts(bot, chatId, user, page = 0) {
   const settings = await getSettings();
   const now = new Date();
 
-  // Premium first (active), then regular by date
   const products = await Product.find({ isSold: false }).sort({ isPremium: -1, createdAt: -1 });
-  // Filter expired premiums — they stay listed but demote
   const sorted = [
     ...products.filter(p => p.isPremium && p.premiumExpiresAt && p.premiumExpiresAt > now),
     ...products.filter(p => !p.isPremium || !p.premiumExpiresAt || p.premiumExpiresAt <= now)
@@ -95,7 +134,7 @@ async function searchProducts(bot, chatId, user, keyword) {
   const regex = new RegExp(keyword, 'i');
   const products = await Product.find({
     isSold: false,
-    $or: [{ name: regex }, { description: regex }, { details: regex }]
+    $or: [{ name: regex }, { description: regex }, { details: regex }, { brand: regex }, { category: regex }]
   }).sort({ isPremium: -1, createdAt: -1 });
 
   if (products.length === 0) {
