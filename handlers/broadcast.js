@@ -156,4 +156,29 @@ async function searchProducts(bot, chatId, user, keyword) {
   clearSession(chatId);
 }
 
-module.exports = { showProducts, searchProducts, sendProductCard };
+// Broadcast a newly approved product to ALL users
+async function broadcastProduct(bot, product) {
+  const settings = await getSettings();
+  const users = await User.find({});
+
+  let successCount = 0;
+  let failCount = 0;
+
+  // Send "New Product Available!" header once per user
+  for (const user of users) {
+    try {
+      await bot.sendMessage(user.telegramId,
+        `🆕 *New Product Available!*\n\nA new item just got listed on Campus Marketplace. Check it out! 👇`,
+        { parse_mode: 'Markdown' }
+      );
+      await sendProductCard(bot, user.telegramId, product, user, settings);
+      successCount++;
+    } catch (err) {
+      failCount++;
+    }
+  }
+
+  return { successCount, failCount };
+}
+
+module.exports = { showProducts, searchProducts, sendProductCard, broadcastProduct };
