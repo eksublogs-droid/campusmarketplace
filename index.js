@@ -10,7 +10,11 @@ const Product = require('./models/Product');
 const Settings = require('./models/Settings');
 
 // Handlers
-const { askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink, handleWhatsappInput } = require('./handlers/verification');
+const {
+  askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink,
+  handleTryVerify, handleTelegramLinkOpened,
+  handleWhatsappInput, askWhatsapp
+} = require('./handlers/verification');
 const {
   showMainMenu, handleBuyFlow, startSellFlow, handlePlanSelection, handleProDays,
   handleMiniAppSubmission,
@@ -30,23 +34,29 @@ const {
 // Utils
 const { getSession, setSession, updateSession, clearSession } = require('./utils/session');
 const { checkExpiringProPlans, demoteExpiredProPlans, deleteOldSoldProducts, deleteOldRejectedReceipts } = require('./utils/cron');
+const { mainMenu } = require('./utils/keyboard');
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const app = express();
 
-// multer: store files in memory so we can send them to Telegram
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 } // 20MB per file
+  limits: { fileSize: 20 * 1024 * 1024 }
 });
 
-app.use(express.json({ limit: '1mb' })); // JSON body only for non-file routes
+app.use(express.json({ limit: '1mb' }));
 
 // ========== MONGODB CONNECTION ==========
 mongoose.connect(process.env.MONGODB_URI).then(() => {
   console.log('✅ MongoDB connected');
   bot.startPolling();
   console.log('✅ Bot polling started');
+
+  // Set bot menu button to /begin so users always see it
+  bot.setMyCommands([
+    { command: 'begin', description: '🏠 Show main menu' },
+    { command: 'start', description: '▶️ Start / restart' }
+  ]).catch(() => {});
 }).catch(err => {
   console.error('❌ MongoDB error:', err.message);
   process.exit(1);
@@ -84,14 +94,13 @@ async function checkUserReady(bot, chatId, user) {
     return false;
   }
 
-  if (!user.verified) {
-    await showVerificationStep(bot, chatId, user);
+  if (!user.whatsappSubmitted) {
+    await askWhatsapp(bot, chatId);
     return false;
   }
 
-  if (!user.whatsappSubmitted) {
-    const { askWhatsapp } = require('./handlers/verification');
-    await askWhatsapp(bot, chatId);
+  if (!user.verified) {
+    await showVerificationStep(bot, chatId, user);
     return false;
   }
 
@@ -99,7 +108,6 @@ async function checkUserReady(bot, chatId, user) {
 }
 
 // ========== UPLOAD FILE BUFFER TO TELEGRAM STORAGE CHANNEL ==========
-// Sends the file to STORAGE_CHANNEL_ID, gets back a Telegram file_id
 async function uploadToTelegram(fileBuffer, mimeType, filename) {
   const storageChannelId = process.env.STORAGE_CHANNEL_ID;
   if (!storageChannelId) throw new Error('STORAGE_CHANNEL_ID not set in .env');
@@ -118,13 +126,11 @@ async function uploadToTelegram(fileBuffer, mimeType, filename) {
       contentType: mimeType || 'image/jpeg'
     });
     const photos = msg.photo;
-    // Use the largest version (last in array)
     return { file_id: photos[photos.length - 1].file_id, type: 'photo' };
   }
 }
 
 // ========== MINI APP SUBMISSION ENDPOINT ==========
-// Receives multipart/form-data: files in req.files, JSON fields in req.body
 app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
   try {
     const { userId, plan, days, amount, ...formFields } = req.body;
@@ -133,7 +139,6 @@ app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
       return res.status(400).json({ error: 'userId required' });
     }
 
-    // Upload each file to Telegram storage channel, collect file_ids
     const mediaArray = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
@@ -142,7 +147,6 @@ app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
           mediaArray.push(result);
         } catch (uploadErr) {
           console.error('❌ Telegram upload error:', uploadErr.message);
-          // Continue — don't fail whole submission if one photo fails
         }
       }
     }
@@ -163,12 +167,31 @@ app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
   }
 });
 
-// ========== TESTER RESET (ID: 6511973707 only) ==========
+// ========== TESTER RESET ==========
 bot.onText(/^\/reset$/, async (msg) => {
   const chatId = msg.chat.id;
   if (String(chatId) !== '6511973707') return;
   await User.deleteOne({ telegramId: chatId });
   await bot.sendMessage(chatId, '🗑 Your account has been wiped. Send /start to begin fresh.');
+});
+
+// ========== /begin COMMAND — show welcome + main menu buttons ==========
+bot.onText(/^\/begin$/, async (msg) => {
+  const chatId = msg.chat.id;
+  const user = await User.findOne({ telegramId: chatId });
+  if (!user || !user.verified) return;
+
+  await bot.sendMessage(chatId,
+    `👋 Welcome back *${user.firstName}*\\!\n\n` +
+    `Here's what you can do:\n\n` +
+    `🛍️ *Buy Used Items* — Browse available products\n` +
+    `💰 *Sell Used Items* — List your item for sale\n\n` +
+    `Use the buttons below 👇`,
+    {
+      parse_mode: 'MarkdownV2',
+      reply_markup: mainMenu()
+    }
+  );
 });
 
 // ========== START COMMAND ==========
@@ -182,8 +205,6 @@ bot.onText(/^\/start(.*)/, async (msg) => {
   if (param && param.startsWith('verified_')) {
     const verified = await handleVerifyDeepLink(bot, chatId, param);
     if (verified) {
-      // Re-fetch user then go through checkUserReady so WhatsApp step fires if needed
-      // Do NOT call showMainMenu directly here — that caused the triple-message
       const freshUser = await User.findOne({ telegramId: chatId });
       const ready = await checkUserReady(bot, chatId, freshUser);
       if (ready) await showMainMenu(bot, chatId, freshUser);
@@ -196,10 +217,12 @@ bot.onText(/^\/start(.*)/, async (msg) => {
     const productId = param.replace('view_', '');
     try {
       const { sendProductCard } = require('./handlers/product');
-      const Settings = require('./models/Settings');
+      const settings = await Settings.findOne() || new Settings();
       const product = await Product.findById(productId);
       if (!product) return bot.sendMessage(chatId, '❌ Product not found or has been removed.');
-      const settings = await Settings.findOne() || new Settings();
+      // Auto show products instead of /start
+      const ready = await checkUserReady(bot, chatId, user);
+      if (!ready) return;
       await sendProductCard(bot, chatId, product, user, settings);
     } catch (e) {
       await bot.sendMessage(chatId, '❌ Could not load product.');
@@ -223,6 +246,7 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text || '';
   if (text.startsWith('/start')) return;
+  if (text === '/begin') return; // handled by onText
   const user = await User.findOne({ telegramId: chatId });
 
   if (!user) return;
@@ -258,14 +282,9 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Regular user message handling
+  // Regular user message handling — enforce order: gmail -> whatsapp -> verify
   if (!user.gmailSubmitted) {
     return await handleGmailInput(bot, chatId, text, user);
-  }
-
-  if (!user.verified) {
-    await showVerificationStep(bot, chatId, user);
-    return;
   }
 
   if (!user.whatsappSubmitted) {
@@ -274,8 +293,12 @@ bot.on('message', async (msg) => {
       await handleWhatsappInput(bot, chatId, text, user);
       return;
     }
-    const { askWhatsapp } = require('./handlers/verification');
     await askWhatsapp(bot, chatId);
+    return;
+  }
+
+  if (!user.verified) {
+    await showVerificationStep(bot, chatId, user);
     return;
   }
 
@@ -349,6 +372,19 @@ bot.on('callback_query', async (query) => {
 
   const adminMode = isAdmin(chatId);
 
+  // Telegram link opened tracking
+  if (data === 'telegram_link_opened') {
+    await handleTelegramLinkOpened(bot, chatId);
+    return bot.answerCallbackQuery(query.id);
+  }
+
+  // Try verify callback (from "Click Here to Get Verified" button)
+  if (data && data.startsWith('try_verify_')) {
+    const targetId = data.replace('try_verify_', '');
+    await handleTryVerify(bot, chatId, targetId);
+    return bot.answerCallbackQuery(query.id);
+  }
+
   if (data === 'main_menu') return await showMainMenu(bot, chatId, user);
   if (data === 'buy') return await handleBuyFlow(bot, chatId, user);
 
@@ -383,6 +419,12 @@ bot.on('callback_query', async (query) => {
     }
     const days = parseInt(daysStr);
     await handleProDays(bot, chatId, days, user);
+    return bot.answerCallbackQuery(query.id);
+  }
+
+  // View items — auto list products without /start
+  if (data === 'view_items') {
+    await showProducts(bot, chatId, user, 0);
     return bot.answerCallbackQuery(query.id);
   }
 
