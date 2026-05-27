@@ -2,14 +2,20 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const mongoose = require('mongoose');
 const express = require('express');
+const multer = require('multer');
 
 // Models
 const User = require('./models/User');
 const Product = require('./models/Product');
+const Settings = require('./models/Settings');
 
 // Handlers
 const { askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink, handleWhatsappInput } = require('./handlers/verification');
-const { showMainMenu, handleBuyFlow, startSellFlow, handlePlanSelection, handleProDays, proceedWithPaymentForPro, startProductForm, handleProductFormStep, handleMediaUpload, submitProductToAdmin } = require('./handlers/user');
+const {
+  showMainMenu, handleBuyFlow, startSellFlow, handlePlanSelection, handleProDays,
+  handleMiniAppSubmission,
+  startProductForm, handleProductFormStep, handleMediaUpload, submitProductToAdmin
+} = require('./handlers/user');
 const { initiatePayment, handleReceiptPhoto } = require('./handlers/payment');
 const { showProducts, searchProducts } = require('./handlers/product');
 const {
@@ -27,7 +33,14 @@ const { checkExpiringProPlans, demoteExpiredProPlans, deleteOldSoldProducts, del
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const app = express();
-app.use(express.json());
+
+// multer: store files in memory so we can send them to Telegram
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB per file
+});
+
+app.use(express.json({ limit: '1mb' })); // JSON body only for non-file routes
 
 // ========== MONGODB CONNECTION ==========
 mongoose.connect(process.env.MONGODB_URI).then(() => {
@@ -84,6 +97,71 @@ async function checkUserReady(bot, chatId, user) {
 
   return true;
 }
+
+// ========== UPLOAD FILE BUFFER TO TELEGRAM STORAGE CHANNEL ==========
+// Sends the file to STORAGE_CHANNEL_ID, gets back a Telegram file_id
+async function uploadToTelegram(fileBuffer, mimeType, filename) {
+  const storageChannelId = process.env.STORAGE_CHANNEL_ID;
+  if (!storageChannelId) throw new Error('STORAGE_CHANNEL_ID not set in .env');
+
+  const isVideo = mimeType && mimeType.startsWith('video');
+
+  if (isVideo) {
+    const msg = await bot.sendVideo(storageChannelId, fileBuffer, {}, {
+      filename: filename || 'video.mp4',
+      contentType: mimeType || 'video/mp4'
+    });
+    return { file_id: msg.video.file_id, type: 'video' };
+  } else {
+    const msg = await bot.sendPhoto(storageChannelId, fileBuffer, {}, {
+      filename: filename || 'photo.jpg',
+      contentType: mimeType || 'image/jpeg'
+    });
+    const photos = msg.photo;
+    // Use the largest version (last in array)
+    return { file_id: photos[photos.length - 1].file_id, type: 'photo' };
+  }
+}
+
+// ========== MINI APP SUBMISSION ENDPOINT ==========
+// Receives multipart/form-data: files in req.files, JSON fields in req.body
+app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
+  try {
+    const { userId, plan, days, amount, ...formFields } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+
+    // Upload each file to Telegram storage channel, collect file_ids
+    const mediaArray = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        try {
+          const result = await uploadToTelegram(file.buffer, file.mimetype, file.originalname);
+          mediaArray.push(result);
+        } catch (uploadErr) {
+          console.error('❌ Telegram upload error:', uploadErr.message);
+          // Continue — don't fail whole submission if one photo fails
+        }
+      }
+    }
+
+    const settings = await Settings.findOne();
+
+    await handleMiniAppSubmission(
+      bot,
+      parseInt(userId),
+      { plan, days, amount, ...formFields, media: mediaArray },
+      settings
+    );
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ submit-listing error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ========== TESTER RESET (ID: 6511973707 only) ==========
 bot.onText(/^\/reset$/, async (msg) => {
@@ -150,7 +228,6 @@ bot.on('message', async (msg) => {
       return await handleRejectReason(bot, chatId, text);
     }
 
-    // Receipt rejection reason
     if (session && session.step === 'admin_receipt_reject_reason') {
       return await handleReceiptRejectReason(bot, chatId, text);
     }
@@ -189,15 +266,11 @@ bot.on('message', async (msg) => {
     return await searchProducts(bot, chatId, user, text);
   }
 
-  if (session && session.step && session.step.startsWith('sell_product')) {
-    return await handleProductFormStep(bot, chatId, text);
-  }
-
   if (session && session.step === 'select_pro_days_custom') {
     const days = parseInt(text);
     if (isNaN(days) || days <= 0) return bot.sendMessage(chatId, '❌ Enter a valid number of days.');
     updateSession(chatId, { promoDays: days });
-    return await handleProDays(bot, chatId, days);
+    return await handleProDays(bot, chatId, days, user);
   }
 
   if (text.startsWith('/')) {
@@ -214,7 +287,6 @@ bot.on('photo', async (msg) => {
   const session = getSession(chatId);
   const file_id = msg.photo[msg.photo.length - 1].file_id;
 
-  // Admin photo uploads (product media)
   if (isAdmin(chatId)) {
     if (session && session.step === 'admin_add_product_media') {
       return await handleAdminMediaUpload(bot, chatId, file_id, 'photo');
@@ -222,17 +294,10 @@ bot.on('photo', async (msg) => {
     return;
   }
 
-  // User must be verified for anything below
   if (!user.verified) return;
 
-  // Receipt photo
   if (session && session.step === 'awaiting_receipt') {
     return await handleReceiptPhoto(bot, chatId, file_id, user);
-  }
-
-  // Product media upload
-  if (session && session.step === 'sell_product_media') {
-    return await handleMediaUpload(bot, chatId, file_id, 'photo');
   }
 });
 
@@ -245,10 +310,6 @@ bot.on('video', async (msg) => {
   if (!session) return;
 
   const file_id = msg.video.file_id;
-
-  if (session.step === 'sell_product_media') {
-    return await handleMediaUpload(bot, chatId, file_id, 'video');
-  }
 
   if (session.step === 'admin_add_product_media') {
     return await handleAdminMediaUpload(bot, chatId, file_id, 'video');
@@ -265,15 +326,8 @@ bot.on('callback_query', async (query) => {
 
   const adminMode = isAdmin(chatId);
 
-  // ===== MAIN MENU =====
-  if (data === 'main_menu') {
-    return await showMainMenu(bot, chatId, user);
-  }
-
-  // ===== BUY FLOW =====
-  if (data === 'buy') {
-    return await handleBuyFlow(bot, chatId, user);
-  }
+  if (data === 'main_menu') return await showMainMenu(bot, chatId, user);
+  if (data === 'buy') return await handleBuyFlow(bot, chatId, user);
 
   if (data.startsWith('page_')) {
     const page = parseInt(data.split('_')[1]);
@@ -285,104 +339,58 @@ bot.on('callback_query', async (query) => {
     return bot.sendMessage(chatId, '🔍 What are you looking for?');
   }
 
-  // ===== SELL FLOW =====
-  if (data === 'sell') {
-    return await startSellFlow(bot, chatId, user);
-  }
+  if (data === 'sell') return await startSellFlow(bot, chatId, user);
 
   if (data === 'plan_free') {
-    await handlePlanSelection(bot, chatId, 'free');
+    await handlePlanSelection(bot, chatId, 'free', user);
     return bot.answerCallbackQuery(query.id);
   }
 
   if (data === 'plan_pro') {
-    await handlePlanSelection(bot, chatId, 'pro');
+    await handlePlanSelection(bot, chatId, 'pro', user);
     return bot.answerCallbackQuery(query.id);
   }
 
   if (data.startsWith('prodays_')) {
     const daysStr = data.split('_')[1];
-
     if (daysStr === 'custom') {
       setSession(chatId, 'select_pro_days_custom');
       bot.sendMessage(chatId, 'How many days? (type a number):');
       return bot.answerCallbackQuery(query.id);
     }
-
     const days = parseInt(daysStr);
-    await handleProDays(bot, chatId, days);
+    await handleProDays(bot, chatId, days, user);
     return bot.answerCallbackQuery(query.id);
   }
 
-  if (data === 'proceed_payment') {
-    await proceedWithPaymentForPro(bot, chatId, user);
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  if (data === 'submit_product') {
-    await submitProductToAdmin(bot, chatId, user);
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  // ===== ADMIN FLOWS =====
   if (adminMode) {
-    if (data === 'admin_menu') {
-      return await showAdminMenu(bot, chatId);
-    }
+    if (data === 'admin_menu') return await showAdminMenu(bot, chatId);
+    if (data === 'admin_add_product') return await startAddProduct(bot, chatId);
+    if (data === 'admin_pending') return await showPendingSubmissions(bot, chatId);
+    if (data === 'admin_pending_payments') return await showPendingPayments(bot, chatId);
+    if (data === 'admin_products') return await showActiveProducts(bot, chatId);
+    if (data === 'admin_settings') return await showSettings(bot, chatId);
 
-    if (data === 'admin_add_product') {
-      return await startAddProduct(bot, chatId);
-    }
-
-    if (data === 'admin_pending') {
-      return await showPendingSubmissions(bot, chatId);
-    }
-
-    if (data === 'admin_pending_payments') {
-      return await showPendingPayments(bot, chatId);
-    }
-
-    if (data === 'admin_products') {
-      return await showActiveProducts(bot, chatId);
-    }
-
-    if (data === 'admin_settings') {
-      return await showSettings(bot, chatId);
-    }
-
-    // Receipt: approve
     if (data.startsWith('receipt_approve_')) {
-      const id = data.replace('receipt_approve_', '');
-      await approveReceipt(bot, chatId, id);
+      await approveReceipt(bot, chatId, data.replace('receipt_approve_', ''));
       return bot.answerCallbackQuery(query.id);
     }
-
-    // Receipt: reject (asks for reason)
     if (data.startsWith('receipt_reject_')) {
-      const id = data.replace('receipt_reject_', '');
-      await startRejectReceipt(bot, chatId, id);
+      await startRejectReceipt(bot, chatId, data.replace('receipt_reject_', ''));
       return bot.answerCallbackQuery(query.id);
     }
-
-    // Receipt: re-review
     if (data.startsWith('receipt_rereview_')) {
-      const id = data.replace('receipt_rereview_', '');
-      await reReviewReceipt(bot, chatId, id);
+      await reReviewReceipt(bot, chatId, data.replace('receipt_rereview_', ''));
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data.startsWith('approve_')) {
-      const id = data.split('_')[1];
-      await approveSubmission(bot, chatId, id);
+      await approveSubmission(bot, chatId, data.split('_')[1]);
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data.startsWith('reject_')) {
-      const id = data.split('_')[1];
-      await rejectSubmission(bot, chatId, id);
+      await rejectSubmission(bot, chatId, data.split('_')[1]);
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data === 'admin_wa_default') {
       const session = getSession(chatId);
       if (session && session.step === 'admin_add_product_whatsapp') {
@@ -391,57 +399,42 @@ bot.on('callback_query', async (query) => {
       }
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data === 'admin_wa_custom') {
       setSession(chatId, 'admin_add_product_whatsapp_custom');
       bot.sendMessage(chatId, 'Enter WhatsApp number (with country code, no +):');
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data === 'admin_confirm_post') {
       await confirmAdminProductPost(bot, chatId);
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data.startsWith('mark_sold_')) {
-      const id = data.split('_')[2];
-      await markAsSold(bot, chatId, id);
+      await markAsSold(bot, chatId, data.split('_')[2]);
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data.startsWith('confirm_sold_')) {
-      const id = data.split('_')[2];
-      await confirmSoldProduct(bot, chatId, id);
+      await confirmSoldProduct(bot, chatId, data.split('_')[2]);
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data === 'cancel_sold') {
       clearSession(chatId);
       await showActiveProducts(bot, chatId);
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data === 'settings_whatsapp') {
       await editSettingStep(bot, chatId, 'whatsapp');
       return bot.answerCallbackQuery(query.id);
     }
-
     if (data === 'settings_pro_price') {
       await editSettingStep(bot, chatId, 'pro_price');
       return bot.answerCallbackQuery(query.id);
     }
-
-    // Bank account edit buttons: settings_bank_0, settings_bank_1, settings_bank_2
     if (data.startsWith('settings_bank_')) {
-      const idx = data.split('_')[2];
-      await editSettingStep(bot, chatId, `bank_${idx}`);
+      await editSettingStep(bot, chatId, `bank_${data.split('_')[2]}`);
       return bot.answerCallbackQuery(query.id);
     }
-
-    // Bank account toggle buttons: settings_toggle_0, settings_toggle_1, settings_toggle_2
     if (data.startsWith('settings_toggle_')) {
-      const idx = data.split('_')[2];
-      await editSettingStep(bot, chatId, `toggle_${idx}`);
+      await editSettingStep(bot, chatId, `toggle_${data.split('_')[2]}`);
       return bot.answerCallbackQuery(query.id);
     }
   }
