@@ -227,8 +227,6 @@ bot.onText(/^\/test_channel$/, async (msg) => {
   const chatId = msg.chat.id;
   if (!isAdmin(chatId)) return;
 
-  await bot.sendMessage(chatId, '🔍 Running channel test... please wait.');
-
   const storageChannelId = process.env.STORAGE_CHANNEL_ID;
 
   // Step 1: Check env var
@@ -237,47 +235,13 @@ bot.onText(/^\/test_channel$/, async (msg) => {
   }
   await bot.sendMessage(chatId, `✅ Step 1: STORAGE_CHANNEL_ID found → ${storageChannelId}`);
 
-  // Step 2: Try sending a real photo to the channel
-  try {
-    // Create a tiny valid 1x1 pixel red JPEG as test image
-    const testImageBuffer = Buffer.from(
-      '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8U' +
-      'HRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgN' +
-      'DRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy' +
-      'MjL/wAARCAABAAEDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAABgUE/8QAIhAAAgIB' +
-      'BAMAAAAAAAAAAAAAAQIDBAUREiExQf/EABQBAQAAAAAAAAAAAAAAAAAAAAD/xAAUEQEAAAAA' +
-      'AAAAAAAAAAAAAP/aAAwDAQACEQMRAD8Amst1tLhZJZI0SONd0jsFVR7knAA+a5fW9Rs9Ps5' +
-      'by+uYba3iXdJLK4VVHuSaKKAP/9k=',
-      'base64'
-    );
-
-    const msg2 = await bot.sendPhoto(storageChannelId, testImageBuffer, {
-      caption: '🧪 Test photo from CampusMarketplace bot — channel is working!'
-    }, {
-      filename: 'test.jpg',
-      contentType: 'image/jpeg'
-    });
-
-    const file_id = msg2.photo[msg2.photo.length - 1].file_id;
-    await bot.sendMessage(chatId,
-      `✅ Step 2: Photo sent to channel successfully!\n\n` +
-      `📋 file_id received: ${file_id.substring(0, 30)}...\n\n` +
-      `✅ *CHANNEL IS WORKING PERFECTLY.*\n` +
-      `Photos from the miniapp will show in all locations.`,
-      { parse_mode: 'Markdown' }
-    );
-
-  } catch (err) {
-    await bot.sendMessage(chatId,
-      `❌ Step 2 FAILED: Could not send photo to channel.\n\n` +
-      `Error: ${err.message}\n\n` +
-      `*What to check:*\n` +
-      `1. Is the bot an admin in the channel?\n` +
-      `2. Is STORAGE_CHANNEL_ID exactly correct?\n` +
-      `3. Open the channel, tap the bot name, confirm it shows "admin"`,
-      { parse_mode: 'Markdown' }
-    );
-  }
+  // Step 2: Ask admin to send real media
+  setSession(chatId, 'test_channel_awaiting_media');
+  updateSession(chatId, { testMediaItems: [] });
+  await bot.sendMessage(chatId,
+    `📸 *Step 2: Send me any photo(s) or video(s) now.*\n\nYou can send a single photo, a single video, or an album of mixed photos and videos. I'll forward them to the storage channel to confirm everything is working.`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 // ========== TESTER RESET ==========
@@ -437,6 +401,82 @@ bot.on('message', async (msg) => {
   }
 });
 
+// ========== TEST CHANNEL MEDIA FLUSH ==========
+// Timers keyed by chatId — used to batch media_group items before sending
+const testChannelTimers = {};
+
+async function flushTestChannelMedia(chatId) {
+  const session = getSession(chatId);
+  if (!session || session.step !== 'test_channel_awaiting_media') return;
+
+  const items = (session.data && session.data.testMediaItems) || [];
+  clearSession(chatId);
+
+  const storageChannelId = process.env.STORAGE_CHANNEL_ID;
+
+  try {
+    if (items.length === 0) {
+      return bot.sendMessage(chatId, '❌ No media received. Please try /test_channel again.');
+    }
+
+    if (items.length === 1) {
+      // Single item — send directly
+      const item = items[0];
+      let sentMsg;
+      if (item.type === 'photo') {
+        sentMsg = await bot.sendPhoto(storageChannelId, item.file_id, {
+          caption: '🧪 Test media from CampusMarketplace bot — channel is working!'
+        });
+        const returned_file_id = sentMsg.photo[sentMsg.photo.length - 1].file_id;
+        return bot.sendMessage(chatId,
+          `✅ Step 2: Photo sent to channel successfully!\n\n` +
+          `📋 file\\_id: ${returned_file_id.substring(0, 30)}...\n\n` +
+          `✅ *CHANNEL IS WORKING PERFECTLY.*`,
+          { parse_mode: 'Markdown' }
+        );
+      } else {
+        sentMsg = await bot.sendVideo(storageChannelId, item.file_id, {
+          caption: '🧪 Test media from CampusMarketplace bot — channel is working!'
+        });
+        const returned_file_id = sentMsg.video.file_id;
+        return bot.sendMessage(chatId,
+          `✅ Step 2: Video sent to channel successfully!\n\n` +
+          `📋 file\\_id: ${returned_file_id.substring(0, 30)}...\n\n` +
+          `✅ *CHANNEL IS WORKING PERFECTLY.*`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    }
+
+    // Multiple items — use sendMediaGroup
+    const mediaGroup = items.map((item, index) => {
+      const base = { type: item.type === 'photo' ? 'photo' : 'video', media: item.file_id };
+      if (index === 0) base.caption = '🧪 Test media from CampusMarketplace bot — channel is working!';
+      return base;
+    });
+
+    const sentMsgs = await bot.sendMediaGroup(storageChannelId, mediaGroup);
+    const count = sentMsgs.length;
+    return bot.sendMessage(chatId,
+      `✅ Step 2: ${count} media item(s) sent to channel successfully!\n\n` +
+      `✅ *CHANNEL IS WORKING PERFECTLY.*\n` +
+      `Photos and videos from the miniapp will show in all locations.`,
+      { parse_mode: 'Markdown' }
+    );
+
+  } catch (err) {
+    return bot.sendMessage(chatId,
+      `❌ Step 2 FAILED: Could not send media to channel.\n\n` +
+      `Error: ${err.message}\n\n` +
+      `*What to check:*\n` +
+      `1. Is the bot an admin in the channel?\n` +
+      `2. Is STORAGE\\_CHANNEL\\_ID exactly correct?\n` +
+      `3. Open the channel, tap the bot name, confirm it shows "admin"`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+}
+
 // ========== PHOTO/VIDEO UPLOAD ==========
 bot.on('photo', async (msg) => {
   const chatId = msg.chat.id;
@@ -447,6 +487,19 @@ bot.on('photo', async (msg) => {
   const file_id = msg.photo[msg.photo.length - 1].file_id;
 
   if (isAdmin(chatId)) {
+    // Test channel: collect photo into media batch, then flush after 1.5s of silence
+    if (session && session.step === 'test_channel_awaiting_media') {
+      const items = (session.data && session.data.testMediaItems) || [];
+      items.push({ type: 'photo', file_id });
+      updateSession(chatId, { testMediaItems: items });
+      // Reset flush timer
+      if (testChannelTimers[chatId]) clearTimeout(testChannelTimers[chatId]);
+      testChannelTimers[chatId] = setTimeout(() => {
+        delete testChannelTimers[chatId];
+        flushTestChannelMedia(chatId);
+      }, 1500);
+      return;
+    }
     if (session && session.step === 'admin_add_product_media') {
       return await handleAdminMediaUpload(bot, chatId, file_id, 'photo');
     }
@@ -463,16 +516,32 @@ bot.on('photo', async (msg) => {
 bot.on('video', async (msg) => {
   const chatId = msg.chat.id;
   const user = await User.findOne({ telegramId: chatId });
-  if (!user || !user.verified) return;
+  if (!user) return;
 
   const session = getSession(chatId);
-  if (!session) return;
-
   const file_id = msg.video.file_id;
 
-  if (session.step === 'admin_add_product_media') {
-    return await handleAdminMediaUpload(bot, chatId, file_id, 'video');
+  if (isAdmin(chatId)) {
+    // Test channel: collect video into media batch, then flush after 1.5s of silence
+    if (session && session.step === 'test_channel_awaiting_media') {
+      const items = (session.data && session.data.testMediaItems) || [];
+      items.push({ type: 'video', file_id });
+      updateSession(chatId, { testMediaItems: items });
+      // Reset flush timer
+      if (testChannelTimers[chatId]) clearTimeout(testChannelTimers[chatId]);
+      testChannelTimers[chatId] = setTimeout(() => {
+        delete testChannelTimers[chatId];
+        flushTestChannelMedia(chatId);
+      }, 1500);
+      return;
+    }
+    if (session && session.step === 'admin_add_product_media') {
+      return await handleAdminMediaUpload(bot, chatId, file_id, 'video');
+    }
+    return;
   }
+
+  if (!user.verified) return;
 });
 
 // ========== CALLBACK QUERY ==========
