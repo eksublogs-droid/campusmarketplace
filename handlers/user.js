@@ -210,7 +210,8 @@ async function notifyAdminNewSubmission(bot, submission) {
     `📋 Plan      : ${submission.plan === 'pro' ? `Pro (${submission.premiumDays} days)` : 'Free'}\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `📦 Title     : ${submission.productName}\n` +
-    `🗂 Category  : ${submission.category} > ${submission.subcategory}\n` +
+    `🗂 Category  : ${submission.category}\n` +
+    `📁 Subcategory: ${submission.subcategory}\n` +
     `🏷 Brand     : ${submission.brand}\n` +
     `⚙️ Condition : ${submission.condition}\n` +
     `📄 Desc      : ${submission.description || 'N/A'}\n` +
