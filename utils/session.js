@@ -6,8 +6,13 @@ function getSession(telegramId) {
   return sessions[telegramId] || null;
 }
 
-function setSession(telegramId, step, data = {}) {
-  sessions[telegramId] = { step, data };
+// Only updates the step — never wipes existing data
+function setSession(telegramId, step) {
+  if (!sessions[telegramId]) {
+    sessions[telegramId] = { step, data: {} };
+  } else {
+    sessions[telegramId].step = step;
+  }
 }
 
 function updateSession(telegramId, data) {
