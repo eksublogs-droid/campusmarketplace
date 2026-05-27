@@ -8,7 +8,7 @@ const User = require('./models/User');
 const Product = require('./models/Product');
 
 // Handlers
-const { askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink } = require('./handlers/verification');
+const { askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink, handleWhatsappInput } = require('./handlers/verification');
 const { showMainMenu, handleBuyFlow, startSellFlow, handlePlanSelection, handleProDays, proceedWithPaymentForPro, startProductForm, handleProductFormStep, handleMediaUpload, submitProductToAdmin } = require('./handlers/user');
 const { initiatePayment, handleReceiptPhoto } = require('./handlers/payment');
 const { showProducts, searchProducts } = require('./handlers/product');
@@ -73,6 +73,12 @@ async function checkUserReady(bot, chatId, user) {
 
   if (!user.verified) {
     await showVerificationStep(bot, chatId, user);
+    return false;
+  }
+
+  if (!user.whatsappSubmitted) {
+    const { askWhatsapp } = require('./handlers/verification');
+    await askWhatsapp(bot, chatId);
     return false;
   }
 
@@ -166,6 +172,17 @@ bot.on('message', async (msg) => {
     return;
   }
 
+  if (!user.whatsappSubmitted) {
+    const session = getSession(chatId);
+    if (session && session.step === 'awaiting_whatsapp') {
+      await handleWhatsappInput(bot, chatId, text, user);
+      return;
+    }
+    const { askWhatsapp } = require('./handlers/verification');
+    await askWhatsapp(bot, chatId);
+    return;
+  }
+
   const session = getSession(chatId);
 
   if (session && session.step === 'searching') {
@@ -181,10 +198,6 @@ bot.on('message', async (msg) => {
     if (isNaN(days) || days <= 0) return bot.sendMessage(chatId, '❌ Enter a valid number of days.');
     updateSession(chatId, { promoDays: days });
     return await handleProDays(bot, chatId, days);
-  }
-
-  if (session && session.step === 'sell_product_whatsapp_custom') {
-    return await handleProductFormStep(bot, chatId, text);
   }
 
   if (text.startsWith('/')) {
@@ -303,21 +316,6 @@ bot.on('callback_query', async (query) => {
 
   if (data === 'proceed_payment') {
     await proceedWithPaymentForPro(bot, chatId, user);
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  if (data === 'wa_default') {
-    const session = getSession(chatId);
-    if (session && session.step === 'sell_product_whatsapp') {
-      setSession(chatId, 'sell_product_price');
-      bot.sendMessage(chatId, '💰 What is your asking price? (₦)');
-    }
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  if (data === 'wa_custom') {
-    setSession(chatId, 'sell_product_whatsapp_custom');
-    bot.sendMessage(chatId, 'Enter WhatsApp number (with country code, no +):');
     return bot.answerCallbackQuery(query.id);
   }
 
