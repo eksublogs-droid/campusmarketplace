@@ -2,10 +2,6 @@ const Settings = require('../models/Settings');
 const PaymentReceipt = require('../models/PaymentReceipt');
 const { setSession, updateSession, getSession, clearSession } = require('../utils/session');
 
-/**
- * Called when user clicks "Proceed to Payment".
- * Shows active bank account details + instructs them to send receipt.
- */
 async function initiatePayment(bot, chatId, user, days, pricePerDay) {
   const amount = days * pricePerDay;
   const settings = await Settings.findOne() || new Settings();
@@ -18,7 +14,6 @@ async function initiatePayment(bot, chatId, user, days, pricePerDay) {
     );
   }
 
-  // Build bank details block
   let bankBlock = '';
   activeAccounts.forEach((acc, i) => {
     bankBlock +=
@@ -40,20 +35,19 @@ async function initiatePayment(bot, chatId, user, days, pricePerDay) {
   );
 
   setSession(chatId, 'awaiting_receipt');
-  updateSession(chatId, { paymentDays: days, paymentAmount: amount });
+  // Use BOTH key-name conventions so handleReceiptPhoto always finds them
+  updateSession(chatId, { paymentDays: days, paymentAmount: amount, promoDays: days, proAmount: amount });
 }
 
-/**
- * Called when user sends a photo while in 'awaiting_receipt' state.
- * Saves the receipt and pings admin immediately.
- */
 async function handleReceiptPhoto(bot, chatId, fileId, user) {
   const session = getSession(chatId);
   if (!session || session.step !== 'awaiting_receipt') return;
 
-  const { paymentDays, paymentAmount } = session.data;
+  // Support both key-name conventions (direct payment flow uses paymentDays/paymentAmount,
+  // miniapp submission flow stores promoDays/proAmount)
+  const paymentDays   = session.data.paymentDays   || session.data.promoDays   || 0;
+  const paymentAmount = session.data.paymentAmount  || session.data.proAmount   || 0;
 
-  // Save receipt to DB
   const receipt = new PaymentReceipt({
     telegramId:     user.telegramId,
     firstName:      user.firstName,
@@ -65,7 +59,6 @@ async function handleReceiptPhoto(bot, chatId, fileId, user) {
   });
   await receipt.save();
 
-  // Tell user it's pending
   await bot.sendMessage(chatId,
     `✅ *Receipt received!*\n\n` +
     `Your payment of ₦${paymentAmount.toLocaleString()} is pending admin approval.\n` +
@@ -73,16 +66,11 @@ async function handleReceiptPhoto(bot, chatId, fileId, user) {
     { parse_mode: 'Markdown' }
   );
 
-  // Clear session — they're done until admin approves
   clearSession(chatId);
 
-  // Ping admin immediately
   await notifyAdminNewReceipt(bot, receipt);
 }
 
-/**
- * Sends receipt + Approve/Reject buttons to admin.
- */
 async function notifyAdminNewReceipt(bot, receipt) {
   const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID);
 
@@ -92,7 +80,7 @@ async function notifyAdminNewReceipt(bot, receipt) {
     `👤 Name: ${receipt.firstName}\n` +
     `🆔 Username: @${receipt.username || 'N/A'}\n` +
     `🔢 Telegram ID: ${receipt.telegramId}\n` +
-    `💵 Amount Expected: ₦${receipt.amountExpected.toLocaleString()}\n` +
+    `💵 Amount Expected: ₦${(receipt.amountExpected || 0).toLocaleString()}\n` +
     `📅 Days: ${receipt.days}\n` +
     `🕐 Submitted: ${receipt.submittedAt.toLocaleString('en-NG')}`;
 
@@ -100,12 +88,10 @@ async function notifyAdminNewReceipt(bot, receipt) {
     caption,
     parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '✅ Approve', callback_data: `receipt_approve_${receipt._id}` },
-          { text: '❌ Reject', callback_data: `receipt_reject_${receipt._id}` }
-        ]
-      ]
+      inline_keyboard: [[
+        { text: '✅ Approve', callback_data: `receipt_approve_${receipt._id}` },
+        { text: '❌ Reject',  callback_data: `receipt_reject_${receipt._id}`  }
+      ]]
     }
   });
 }
