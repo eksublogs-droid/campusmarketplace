@@ -164,11 +164,15 @@ async function showPendingSubmissions(bot, chatId) {
   await bot.sendMessage(chatId, `📋 *${submissions.length}* Pending Submission(s)`, { parse_mode: 'Markdown' });
 
   for (const sub of submissions) {
+    const price = sub.sellingPrice || sub.askingPrice || 0;
+    const loc = [sub.city, sub.state].filter(Boolean).join(', ') || sub.location || 'N/A';
+    // Plain text only — no Markdown — so user-submitted data with _ or * won't break rendering
     const msg =
-      `👤 ${sub.firstName} (@${sub.username})\n` +
+      `👤 ${sub.firstName} (@${sub.username || 'N/A'})\n` +
       `📦 ${sub.productName}\n` +
-      `💰 ₦${sub.askingPrice.toLocaleString()}\n` +
-      `📍 ${sub.location}\n` +
+      `🗂 ${sub.category || 'N/A'} › ${sub.subcategory || 'N/A'}\n` +
+      `💰 ₦${price.toLocaleString()}\n` +
+      `📍 ${loc}\n` +
       `📋 Plan: ${sub.plan}`;
 
     await bot.sendMessage(chatId, msg, {
