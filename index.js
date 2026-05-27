@@ -149,6 +149,20 @@ async function uploadToTelegram(fileBuffer, mimeType, filename) {
   }
 }
 
+// ========== MEDIA PRE-UPLOAD ENDPOINT ==========
+app.post('/api/upload-media', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file provided' });
+  }
+  try {
+    const result = await uploadToTelegram(req.file.buffer, req.file.mimetype, req.file.originalname);
+    return res.json({ success: true, file_id: result.file_id, type: result.type });
+  } catch (err) {
+    console.error('Pre-upload error:', err.message);
+    return res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
 // ========== MINI APP SUBMISSION ENDPOINT ==========
 app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
   const { userId, plan, days, amount, ...formFields } = req.body;
@@ -163,9 +177,26 @@ app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
   // Process everything in the background
   (async () => {
     try {
+      const settings = await Settings.findOne();
+
+      // Photos were pre-uploaded individually as user added them.
+      // By submit time, file_ids are already ready — just parse them.
       const mediaArray = [];
+      const preuploadedMedia = req.body.preuploadedMedia;
+      if (preuploadedMedia) {
+        const items = Array.isArray(preuploadedMedia) ? preuploadedMedia : [preuploadedMedia];
+        items.forEach(item => {
+          try {
+            const parsed = JSON.parse(item);
+            if (parsed.file_id) mediaArray.push(parsed);
+          } catch (e) {
+            console.error('Failed to parse preuploadedMedia item:', e.message);
+          }
+        });
+      }
+
+      // Fallback: if any files were sent the old way, upload them now
       if (req.files && req.files.length > 0) {
-        // Upload all media in parallel for speed
         const uploads = await Promise.allSettled(
           req.files.map(file => uploadToTelegram(file.buffer, file.mimetype, file.originalname))
         );
@@ -178,8 +209,7 @@ app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
         });
       }
 
-      const settings = await Settings.findOne();
-
+      // Save submission with media — admin notified with photos ready
       await handleMiniAppSubmission(
         bot,
         parseInt(userId),
@@ -190,6 +220,64 @@ app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
       console.error('❌ submit-listing background error:', err);
     }
   })();
+});
+
+// ========== ADMIN CHANNEL TEST ==========
+bot.onText(/^\/test_channel$/, async (msg) => {
+  const chatId = msg.chat.id;
+  if (!isAdmin(chatId)) return;
+
+  await bot.sendMessage(chatId, '🔍 Running channel test... please wait.');
+
+  const storageChannelId = process.env.STORAGE_CHANNEL_ID;
+
+  // Step 1: Check env var
+  if (!storageChannelId) {
+    return bot.sendMessage(chatId, '❌ FAILED: STORAGE_CHANNEL_ID is not set in your Railway environment variables.');
+  }
+  await bot.sendMessage(chatId, `✅ Step 1: STORAGE_CHANNEL_ID found → ${storageChannelId}`);
+
+  // Step 2: Try sending a real photo to the channel
+  try {
+    // Create a tiny valid 1x1 pixel red JPEG as test image
+    const testImageBuffer = Buffer.from(
+      '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8U' +
+      'HRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgN' +
+      'DRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy' +
+      'MjL/wAARCAABAAEDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAABgUE/8QAIhAAAgIB' +
+      'BAMAAAAAAAAAAAAAAQIDBAUREiExQf/EABQBAQAAAAAAAAAAAAAAAAAAAAD/xAAUEQEAAAAA' +
+      'AAAAAAAAAAAAAP/aAAwDAQACEQMRAD8Amst1tLhZJZI0SONd0jsFVR7knAA+a5fW9Rs9Ps5' +
+      'by+uYba3iXdJLK4VVHuSaKKAP/9k=',
+      'base64'
+    );
+
+    const msg2 = await bot.sendPhoto(storageChannelId, testImageBuffer, {
+      caption: '🧪 Test photo from CampusMarketplace bot — channel is working!'
+    }, {
+      filename: 'test.jpg',
+      contentType: 'image/jpeg'
+    });
+
+    const file_id = msg2.photo[msg2.photo.length - 1].file_id;
+    await bot.sendMessage(chatId,
+      `✅ Step 2: Photo sent to channel successfully!\n\n` +
+      `📋 file_id received: ${file_id.substring(0, 30)}...\n\n` +
+      `✅ *CHANNEL IS WORKING PERFECTLY.*\n` +
+      `Photos from the miniapp will show in all locations.`,
+      { parse_mode: 'Markdown' }
+    );
+
+  } catch (err) {
+    await bot.sendMessage(chatId,
+      `❌ Step 2 FAILED: Could not send photo to channel.\n\n` +
+      `Error: ${err.message}\n\n` +
+      `*What to check:*\n` +
+      `1. Is the bot an admin in the channel?\n` +
+      `2. Is STORAGE_CHANNEL_ID exactly correct?\n` +
+      `3. Open the channel, tap the bot name, confirm it shows "admin"`,
+      { parse_mode: 'Markdown' }
+    );
+  }
 });
 
 // ========== TESTER RESET ==========
