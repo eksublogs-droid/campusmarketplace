@@ -278,16 +278,20 @@ async function approveReceipt(bot, adminChatId, receiptId) {
   await bot.sendMessage(telegramId,
     `✅ *Payment Approved!*\n\n` +
     `₦${amountExpected.toLocaleString()} confirmed for *${days} day(s)* Pro.\n\n` +
-    `Let's add your product now! 🎉`,
-    { parse_mode: 'Markdown' }
+    `Tap below to fill your listing form now 🎉`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[{
+          text: '📋 Open Listing Form',
+          web_app: { url: `https://eksublogs-droid.github.io/campusmarketplace/miniapp/?userId=${telegramId}&plan=pro&days=${days}&amount=${amountExpected}` }
+        }]]
+      }
+    }
   );
 
-  // Open product form (lazy require avoids circular dependency at module load)
-  const { startProductForm } = require('./user');
-  await startProductForm(bot, telegramId);
-
-  // Store approved days in session so submitProductToAdmin knows it's a pro plan
-  setSession(telegramId, 'sell_product_name');
+  // Store session for pro plan
+  setSession(telegramId, 'awaiting_miniapp');
   updateSession(telegramId, { plan: 'pro', promoDays: days });
 }
 
