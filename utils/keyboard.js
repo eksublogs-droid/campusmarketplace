@@ -10,8 +10,8 @@ function mainMenu() {
 function planSelection() {
   return {
     inline_keyboard: [
-      [{ text: '🆓 Go Free', callback_data: 'plan_free' }],
-      [{ text: '⭐ Go Pro — Recommended', callback_data: 'plan_pro' }]
+      [{ text: '🆓 Free Plan', callback_data: 'plan_free' }],
+      [{ text: '⭐ Pro Plan — Recommended', callback_data: 'plan_pro' }]
     ]
   };
 }
@@ -19,10 +19,11 @@ function planSelection() {
 function proDayOptions() {
   return {
     inline_keyboard: [
-      [{ text: '1 day — ₦1,000', callback_data: 'prodays_1' }, { text: '2 days — ₦2,000', callback_data: 'prodays_2' }],
-      [{ text: '3 days — ₦3,000', callback_data: 'prodays_3' }, { text: '5 days — ₦5,000', callback_data: 'prodays_5' }],
-      [{ text: '7 days — ₦7,000', callback_data: 'prodays_7' }],
-      [{ text: '✏️ Custom Days', callback_data: 'prodays_custom' }]
+      [{ text: '1 day — ₦1,000',   callback_data: 'prodays_1'  }],
+      [{ text: '3 days — ₦3,000',  callback_data: 'prodays_3'  }],
+      [{ text: '7 days — ₦7,000',  callback_data: 'prodays_7'  }],
+      [{ text: '14 days — ₦14,000',callback_data: 'prodays_14' }],
+      [{ text: '30 days — ₦30,000',callback_data: 'prodays_30' }]
     ]
   };
 }
