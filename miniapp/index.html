@@ -458,7 +458,7 @@ const form = {
   doorPickup:null, receiptAvailable:'', warrantyRemaining:'', warrantyDuration:'',
   originalPackaging:''
 };
-let mediaFiles = [];
+let mediaFiles = []; // each entry: { dataUrl, type, file, file_id, uploading, uploadFailed }
 let durationUnit = ''; // 'Days','Months','Years'
 
 const params = new URLSearchParams(location.search);
@@ -684,9 +684,11 @@ function handlePhotos(input) {
     if (mediaFiles.filter(m => m.type === 'photo').length >= 10) return;
     const reader = new FileReader();
     reader.onload = e => {
-      mediaFiles.push({ dataUrl: e.target.result, type: 'photo', file });
+      const entry = { dataUrl: e.target.result, type: 'photo', file, file_id: null, uploading: true, uploadFailed: false };
+      mediaFiles.push(entry);
       renderThumbs();
       updateProgress();
+      silentUpload(entry);
     };
     reader.readAsDataURL(file);
   });
@@ -698,11 +700,38 @@ function handleVideo(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    mediaFiles.push({ dataUrl: e.target.result, type: 'video', file });
+    const entry = { dataUrl: e.target.result, type: 'video', file, file_id: null, uploading: true, uploadFailed: false };
+    mediaFiles.push(entry);
     renderThumbs();
+    silentUpload(entry);
   };
   reader.readAsDataURL(file);
   input.value = '';
+}
+
+async function silentUpload(entry) {
+  try {
+    const fd = new FormData();
+    fd.append('file', entry.file, entry.file.name);
+    const res = await fetch('https://campusmarketplace-production-06b3.up.railway.app/api/upload-media', {
+      method: 'POST',
+      body: fd
+    });
+    const data = await res.json();
+    if (data.success && data.file_id) {
+      entry.file_id = data.file_id;
+      entry.type = data.type;
+      entry.uploading = false;
+      entry.uploadFailed = false;
+    } else {
+      entry.uploading = false;
+      entry.uploadFailed = true;
+    }
+  } catch (err) {
+    entry.uploading = false;
+    entry.uploadFailed = true;
+  }
+  renderThumbs();
 }
 
 function renderThumbs() {
@@ -711,10 +740,15 @@ function renderThumbs() {
   mediaFiles.forEach((m, i) => {
     const wrap = document.createElement('div');
     wrap.className = 'thumb-wrap';
+    const indicator = m.uploading
+      ? `<span style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;padding:2px 5px;border-radius:4px">⬆️</span>`
+      : m.uploadFailed
+        ? `<span style="position:absolute;bottom:4px;left:4px;background:rgba(200,0,0,.8);color:#fff;font-size:10px;padding:2px 5px;border-radius:4px">⚠️ retry</span>`
+        : `<span style="position:absolute;bottom:4px;left:4px;background:rgba(0,150,0,.8);color:#fff;font-size:10px;padding:2px 5px;border-radius:4px">✓</span>`;
     if (m.type === 'photo') {
-      wrap.innerHTML = `<img src="${m.dataUrl}" /><button class="rm" onclick="removeMedia(${i})">✕</button>`;
+      wrap.innerHTML = `<img src="${m.dataUrl}" /><button class="rm" onclick="removeMedia(${i})">✕</button>${indicator}`;
     } else {
-      wrap.innerHTML = `<video src="${m.dataUrl}" muted></video><button class="rm" onclick="removeMedia(${i})">✕</button>`;
+      wrap.innerHTML = `<video src="${m.dataUrl}" muted></video><button class="rm" onclick="removeMedia(${i})">✕</button>${indicator}`;
     }
     grid.appendChild(wrap);
   });
@@ -984,39 +1018,43 @@ async function submitListing() {
     });
     fd.append('userId', userId);
 
-    mediaFiles.forEach(m => {
-      fd.append('media', m.file, m.file.name);
-    });
-
-    // Use a 15-second timeout — server now responds immediately
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    let res;
-    try {
-      res = await fetch('https://campusmarketplace-production-06b3.up.railway.app/api/submit-listing', {
-        method: 'POST',
-        body: fd,
-        signal: controller.signal
-      });
-    } catch (fetchErr) {
-      // Timeout or network error — treat as success since server processes async
-      clearTimeout(timeoutId);
-      const modal = document.getElementById('successModal');
-      modal.style.display = 'flex';
-      return;
+    // Retry any failed uploads before submitting
+    const failedUploads = mediaFiles.filter(m => m.uploadFailed || (!m.file_id && !m.uploading));
+    if (failedUploads.length > 0) {
+      btn.innerHTML = '<span class="spinner"></span>Retrying failed uploads...';
+      await Promise.all(failedUploads.map(m => silentUpload(m)));
     }
 
-    clearTimeout(timeoutId);
+    // Wait for any still-uploading files to finish
+    const stillUploading = mediaFiles.filter(m => m.uploading);
+    if (stillUploading.length > 0) {
+      btn.innerHTML = '<span class="spinner"></span>Finishing uploads...';
+      await new Promise(resolve => {
+        const check = setInterval(() => {
+          if (!mediaFiles.some(m => m.uploading)) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 300);
+      });
+    }
+
+    // Attach pre-uploaded file_ids — no files sent, just IDs
+    mediaFiles.forEach(m => {
+      if (m.file_id) {
+        fd.append('preuploadedMedia', JSON.stringify({ file_id: m.file_id, type: m.type }));
+      }
+    });
+
+    btn.innerHTML = '<span class="spinner"></span>Submitting...';
+
+    const res = await fetch('https://campusmarketplace-production-06b3.up.railway.app/api/submit-listing', {
+      method: 'POST',
+      body: fd
+    });
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      // If server returned error JSON, still show success (server may have processed it)
-      if (res.status >= 500) {
-        const modal = document.getElementById('successModal');
-        modal.style.display = 'flex';
-        return;
-      }
       throw new Error(errData.error || 'Server error');
     }
 
