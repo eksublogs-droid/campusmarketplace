@@ -63,9 +63,29 @@
   .thumb-wrap img,.thumb-wrap video{width:100%;height:100%;object-fit:cover}
   .thumb-wrap .rm{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.7);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center}
   .add-video-btn{margin-top:10px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px;color:var(--muted);font-size:13px;cursor:pointer;width:100%;text-align:center}
-  .states-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:320px;overflow-y:auto;padding:4px}
-  .state-item{background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);padding:10px 12px;cursor:pointer;font-size:13px;font-weight:500;transition:border-color .2s;text-align:center}
-  .state-item.selected{border-color:var(--accent);background:rgba(37,99,235,.12)}
+  /* State modal */
+  .state-trigger{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;cursor:pointer;font-size:15px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+  .state-trigger.has-value{color:var(--text);border-color:var(--accent)}
+  .state-trigger .arrow{font-size:12px;color:var(--muted)}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:none;align-items:flex-end}
+  .modal-overlay.open{display:flex}
+  .modal-sheet{background:#1a1a1a;border-radius:20px 20px 0 0;width:100%;max-height:85vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom)}
+  .modal-header{padding:16px 16px 8px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0}
+  .modal-header h2{font-size:16px;font-weight:700}
+  .modal-close{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
+  .modal-search{padding:10px 16px;flex-shrink:0}
+  .modal-search input{background:#111;border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-size:14px;width:100%;outline:none}
+  .modal-search input:focus{border-color:var(--accent)}
+  .modal-list{overflow-y:auto;padding:8px 16px 16px;flex:1}
+  .modal-state-row{padding:14px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+  .modal-state-row:active{background:rgba(255,255,255,.05);margin:0 -16px;padding-left:16px;padding-right:16px}
+  .modal-state-row .check{color:var(--accent);font-size:18px;display:none}
+  .modal-state-row.selected .check{display:block}
+  /* Duration unit buttons */
+  .duration-wrap{display:flex;flex-direction:column;gap:10px}
+  .duration-unit-btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .duration-number-wrap{display:none}
+  .duration-number-wrap.show{display:block}
   .summary-section{margin-bottom:20px}
   .summary-section .sh{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
   .summary-section .sh span{font-size:13px;font-weight:700;color:var(--accent-light)}
@@ -90,7 +110,6 @@
   .toast.show{opacity:1}
   .error-msg{font-size:12px;color:var(--red);margin-top:4px;display:none}
   .error-msg.show{display:block}
-  .skip-link{font-size:13px;color:var(--accent-light);text-align:center;margin-top:10px;cursor:pointer;text-decoration:underline}
 </style>
 </head>
 <body>
@@ -108,7 +127,6 @@
 <div class="section" id="sec1">
   <div class="section-title">📦 Section 1 — Basic Info</div>
 
-  <!-- Step 1: Title -->
   <div class="step">
     <div class="step-label">1. Item Title *</div>
     <input type="text" id="itemTitle" placeholder="e.g. Samsung Galaxy A54, Red Nike Sneakers Size 42" />
@@ -116,7 +134,6 @@
     <div class="error-msg" id="err-title">Please enter an item title.</div>
   </div>
 
-  <!-- Step 2: Category + Subcategory -->
   <div class="step">
     <div class="step-label">2. Category *</div>
     <div class="category-grid" id="catGrid"></div>
@@ -127,7 +144,6 @@
     <div class="error-msg" id="err-cat">Please select a category and subcategory.</div>
   </div>
 
-  <!-- Step 4: Brand -->
   <div class="step">
     <div class="step-label">3. Brand Name *</div>
     <input type="text" id="brand" placeholder="e.g. Samsung, Nike, LG, HP" />
@@ -135,7 +151,6 @@
     <div class="error-msg" id="err-brand">Please enter a brand name.</div>
   </div>
 
-  <!-- Step 5: Condition -->
   <div class="step">
     <div class="step-label">4. Condition *</div>
     <div class="cards" id="conditionCards">
@@ -163,11 +178,10 @@
     <div class="error-msg" id="err-condition">Please select a condition.</div>
   </div>
 
-  <!-- Step 6: Description -->
+  <!-- Description — NO skip link -->
   <div class="step">
     <div class="step-label">5. Description <span style="color:var(--muted);font-weight:400">(optional)</span></div>
     <textarea id="description" placeholder="Share extra details buyers should know — model number, colour, size, specs, etc."></textarea>
-    <div class="skip-link" onclick="document.getElementById('description').value=''">Skip this step</div>
   </div>
 </div>
 
@@ -233,16 +247,21 @@
 <div class="section" id="sec4">
   <div class="section-title">🔍 Section 4 — Item Condition Details</div>
 
+  <!-- Duration — compulsory, 3 unit buttons -->
   <div class="step">
-    <div class="step-label">10. How long have you used it?</div>
-    <div class="two-btns">
-      <div class="tap-btn" id="used-yes" onclick="toggleField('used', true)">Yes, I'll specify</div>
-      <div class="tap-btn" id="used-no" onclick="toggleField('used', false)">Skip</div>
+    <div class="step-label">10. How long have you used it? *</div>
+    <div class="duration-wrap">
+      <div class="duration-unit-btns">
+        <div class="tap-btn" id="dur-days"   onclick="setDurationUnit('Days')">Days</div>
+        <div class="tap-btn" id="dur-months" onclick="setDurationUnit('Months')">Months</div>
+        <div class="tap-btn" id="dur-years"  onclick="setDurationUnit('Years')">Years</div>
+      </div>
+      <div class="duration-number-wrap" id="durationNumberWrap">
+        <input type="number" id="durationNumber" placeholder="Enter number" min="1" oninput="onDurationNumberInput()" />
+        <div class="step-tip" id="durationTip"></div>
+      </div>
     </div>
-    <div class="field-reveal" id="usedField">
-      <input type="text" id="usedDuration" placeholder="e.g. 6 months, 2 years, 3 weeks" style="margin-top:10px" />
-      <div class="step-explain">Buyers want to know how much use and life is left in the item.</div>
-    </div>
+    <div class="error-msg" id="err-used">Please select a unit and enter the number.</div>
   </div>
 
   <div class="step">
@@ -253,7 +272,7 @@
     </div>
     <div class="field-reveal" id="defectsField">
       <textarea id="defectsDetails" placeholder="e.g. Small crack on the back, screen has a minor scratch" style="margin-top:10px"></textarea>
-      <div class="step-explain">Please be honest. Hiding defects leads to disputes. Transparency builds more trust.</div>
+      <div class="step-explain">Please be honest. Hiding defects leads to disputes.</div>
     </div>
     <div class="error-msg" id="err-defects">Please answer this question.</div>
   </div>
@@ -266,7 +285,7 @@
     </div>
     <div class="field-reveal" id="repairsField">
       <textarea id="repairsDetails" placeholder="e.g. Screen replaced 6 months ago, battery changed" style="margin-top:10px"></textarea>
-      <div class="step-explain">Disclosing repairs builds buyer confidence. Knowing an issue was properly fixed gives peace of mind.</div>
+      <div class="step-explain">Disclosing repairs builds buyer confidence.</div>
     </div>
     <div class="error-msg" id="err-repairs">Please answer this question.</div>
   </div>
@@ -279,7 +298,6 @@
     </div>
     <div class="field-reveal" id="reasonField">
       <input type="text" id="reasonForSelling" placeholder="e.g. Upgrading to a newer model, relocating" style="margin-top:10px" />
-      <div class="step-explain">Sharing your reason makes buyers more comfortable and builds trust.</div>
     </div>
   </div>
 </div>
@@ -290,7 +308,10 @@
 
   <div class="step">
     <div class="step-label">14. State *</div>
-    <div class="states-list" id="statesList"></div>
+    <div class="state-trigger" id="stateTrigger" onclick="openStateModal()">
+      <span id="stateTriggerText">Tap to select your state</span>
+      <span class="arrow">▼</span>
+    </div>
     <div class="error-msg" id="err-state">Please select your state.</div>
   </div>
 
@@ -304,7 +325,7 @@
     <div class="step-label">16. Door Dropoff — Can you deliver to the buyer? *</div>
     <div class="step-explain" style="margin-bottom:10px">
       <strong>What is Door Dropoff?</strong><br>
-      You send the item to the buyer via dispatch rider (same city), waybill (long distance), or courier. Delivery fee is agreed privately. An escrow system protects both parties — buyer pays admin first, you ship, buyer confirms receipt, then admin releases your payment.
+      You send the item to the buyer via dispatch rider, waybill, or courier. An escrow system protects both parties.
     </div>
     <div class="two-btns">
       <div class="tap-btn" id="drop-yes" onclick="setDropoff(true)">Yes, I can deliver</div>
@@ -315,9 +336,7 @@
   <div class="step">
     <div class="step-label">17. Door Pickup — Can the buyer come to you? *</div>
     <div class="step-explain" style="margin-bottom:10px">
-      <strong>What is Door Pickup?</strong><br>
-      The buyer comes to collect physically. Your exact address is never shown publicly — only shared privately after both parties agree to meet.<br><br>
-      <strong>Safety tip:</strong> Always meet in public places — malls, fuel stations, cafes, bank premises. Never agree to meet at night or in isolated locations.
+      <strong>Safety tip:</strong> Always meet in public places — malls, fuel stations, cafes, bank premises.
     </div>
     <div class="two-btns">
       <div class="tap-btn" id="pick-yes" onclick="setPickup(true)">Yes, buyer can pick up</div>
@@ -330,25 +349,23 @@
 <!-- SECTION 6: VERIFICATION & TRUST -->
 <div class="section" id="sec6">
   <div class="section-title">🛡 Section 6 — Verification & Trust</div>
-  <div class="step-explain" style="margin-bottom:16px">These three questions are optional but highly recommended. They help buyers feel more confident and can make your item sell faster. Takes less than 30 seconds.</div>
+  <div class="step-explain" style="margin-bottom:16px">These questions are optional but help buyers feel more confident. Takes less than 30 seconds.</div>
 
   <div class="step">
     <div class="step-label">18. Receipt available?</div>
-    <div class="step-explain" style="margin-bottom:8px">A purchase receipt proves the item was legitimately bought. Especially useful for electronics and gadgets.</div>
-    <div class="three-btns">
-      <div class="tap-btn" id="rcpt-yes" onclick="setThree('receipt','yes')">Yes, I have it</div>
-      <div class="tap-btn" id="rcpt-no" onclick="setThree('receipt','no')">No, I don't</div>
-      <div class="tap-btn" id="rcpt-na" onclick="setThree('receipt','na')">Skip</div>
+    <div class="step-explain" style="margin-bottom:8px">A purchase receipt proves the item was legitimately bought.</div>
+    <div class="two-btns">
+      <div class="tap-btn" id="rcpt-yes" onclick="setTwo('receipt','yes')">Yes, I have it</div>
+      <div class="tap-btn" id="rcpt-no"  onclick="setTwo('receipt','no')">No, I don't</div>
     </div>
   </div>
 
   <div class="step">
     <div class="step-label">19. Warranty remaining?</div>
-    <div class="step-explain" style="margin-bottom:8px">An active warranty is a major selling point. Gives buyers peace of mind after purchase.</div>
-    <div class="three-btns">
-      <div class="tap-btn" id="warr-yes" onclick="setThree('warranty','yes')">Yes, has warranty</div>
-      <div class="tap-btn" id="warr-no" onclick="setThree('warranty','no')">No warranty left</div>
-      <div class="tap-btn" id="warr-na" onclick="setThree('warranty','na')">Skip</div>
+    <div class="step-explain" style="margin-bottom:8px">An active warranty is a major selling point.</div>
+    <div class="two-btns">
+      <div class="tap-btn" id="warr-yes" onclick="setTwo('warranty','yes')">Yes, has warranty</div>
+      <div class="tap-btn" id="warr-no"  onclick="setTwo('warranty','no')">No warranty left</div>
     </div>
     <div class="field-reveal" id="warrantyField">
       <input type="text" id="warrantyDuration" placeholder="e.g. 5 months, 1 year, valid till Dec 2025" style="margin-top:10px" />
@@ -357,11 +374,10 @@
 
   <div class="step">
     <div class="step-label">20. Original packaging available?</div>
-    <div class="step-explain" style="margin-bottom:8px">Having the original box, charger, manual, and accessories makes your item look more complete. Buyers often pay more for a complete package.</div>
-    <div class="three-btns">
-      <div class="tap-btn" id="pkg-yes" onclick="setThree('packaging','yes')">Yes, I have it</div>
-      <div class="tap-btn" id="pkg-no" onclick="setThree('packaging','no')">No, I don't</div>
-      <div class="tap-btn" id="pkg-na" onclick="setThree('packaging','na')">Skip</div>
+    <div class="step-explain" style="margin-bottom:8px">Having the original box and accessories makes your item look more complete.</div>
+    <div class="two-btns">
+      <div class="tap-btn" id="pkg-yes" onclick="setTwo('packaging','yes')">Yes, I have it</div>
+      <div class="tap-btn" id="pkg-no"  onclick="setTwo('packaging','no')">No, I don't</div>
     </div>
   </div>
 </div>
@@ -390,6 +406,20 @@
 
 </main>
 
+<!-- STATE MODAL -->
+<div class="modal-overlay" id="stateModal" onclick="onModalOverlayClick(event)">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2>Select Your State</h2>
+      <button class="modal-close" onclick="closeStateModal()">✕</button>
+    </div>
+    <div class="modal-search">
+      <input type="text" id="stateSearch" placeholder="Search state..." oninput="filterStates(this.value)" />
+    </div>
+    <div class="modal-list" id="stateModalList"></div>
+  </div>
+</div>
+
 <div class="action-row">
   <button class="btn btn-outline" id="draftBtn" onclick="saveDraft()">💾 Save Draft</button>
   <button class="btn btn-primary" id="submitBtn" onclick="submitListing()" disabled>Submit Listing</button>
@@ -409,7 +439,8 @@ const form = {
   doorPickup:null, receiptAvailable:'', warrantyRemaining:'', warrantyDuration:'',
   originalPackaging:''
 };
-let mediaFiles = []; // {dataUrl, type, file}
+let mediaFiles = [];
+let durationUnit = ''; // 'Days','Months','Years'
 
 const params = new URLSearchParams(location.search);
 const userId = params.get('userId') || '';
@@ -417,16 +448,20 @@ const plan = params.get('plan') || 'free';
 const days = params.get('days') || '';
 const amount = params.get('amount') || '';
 
-// ===== INIT =====
+// ===== INIT — deferred for load speed =====
 window.addEventListener('DOMContentLoaded', () => {
   if (window.Telegram && Telegram.WebApp) {
     Telegram.WebApp.expand();
     Telegram.WebApp.ready();
   }
+  // Categories are visible first — render immediately
   buildCategories();
-  buildStates();
-  loadDraft();
   updateProgress();
+  // Defer non-critical work until after first paint
+  requestAnimationFrame(() => {
+    buildStates();
+    setTimeout(() => { loadDraft(); }, 0);
+  });
 });
 
 // ===== CATEGORIES =====
@@ -471,21 +506,80 @@ function buildSubcategories(catName) {
   });
 }
 
-// ===== STATES =====
+// ===== STATE MODAL =====
+let stateRowEls = [];
+
 function buildStates() {
-  const list = document.getElementById('statesList');
+  const list = document.getElementById('stateModalList');
+  stateRowEls = [];
   STATES.forEach(s => {
-    const d = document.createElement('div');
-    d.className = 'state-item';
-    d.textContent = s;
-    d.onclick = () => {
-      document.querySelectorAll('.state-item').forEach(x => x.classList.remove('selected'));
-      d.classList.add('selected');
-      form.state = s;
-      updateProgress();
-    };
-    list.appendChild(d);
+    const row = document.createElement('div');
+    row.className = 'modal-state-row';
+    row.dataset.state = s;
+    row.innerHTML = `<span>${s}</span><span class="check">✓</span>`;
+    row.onclick = () => selectState(s, row);
+    list.appendChild(row);
+    stateRowEls.push(row);
   });
+}
+
+function openStateModal() {
+  document.getElementById('stateModal').classList.add('open');
+  document.getElementById('stateSearch').value = '';
+  filterStates('');
+  document.getElementById('stateSearch').focus();
+}
+
+function closeStateModal() {
+  document.getElementById('stateModal').classList.remove('open');
+}
+
+function onModalOverlayClick(e) {
+  if (e.target === document.getElementById('stateModal')) closeStateModal();
+}
+
+function filterStates(q) {
+  const lq = q.toLowerCase();
+  stateRowEls.forEach(row => {
+    row.style.display = row.dataset.state.toLowerCase().includes(lq) ? '' : 'none';
+  });
+}
+
+function selectState(s, row) {
+  stateRowEls.forEach(r => r.classList.remove('selected'));
+  row.classList.add('selected');
+  form.state = s;
+  const trigger = document.getElementById('stateTrigger');
+  document.getElementById('stateTriggerText').textContent = s;
+  trigger.classList.add('has-value');
+  closeStateModal();
+  updateProgress();
+}
+
+// ===== DURATION UNIT (Days/Months/Years) =====
+function setDurationUnit(unit) {
+  durationUnit = unit;
+  ['Days','Months','Years'].forEach(u => {
+    document.getElementById('dur-' + u.toLowerCase()).classList.toggle('selected', u === unit);
+  });
+  document.getElementById('durationNumberWrap').classList.add('show');
+  document.getElementById('durationNumber').value = '';
+  // Set tip and max
+  const tips = { Days: 'Enter 1–30', Months: 'Enter 1–12', Years: 'Enter a number (e.g. 2)' };
+  document.getElementById('durationTip').textContent = tips[unit];
+  document.getElementById('durationNumber').placeholder = tips[unit];
+  form.usedDuration = '';
+  updateProgress();
+}
+
+function onDurationNumberInput() {
+  const n = parseInt(document.getElementById('durationNumber').value);
+  if (!durationUnit || isNaN(n) || n <= 0) { form.usedDuration = ''; return; }
+  if (durationUnit === 'Days' && n > 30) { document.getElementById('durationNumber').value = 30; }
+  if (durationUnit === 'Months' && n > 12) { document.getElementById('durationNumber').value = 12; }
+  const final = parseInt(document.getElementById('durationNumber').value);
+  form.usedDuration = final + ' ' + durationUnit.toLowerCase();
+  updateProgress();
 }
 
 // ===== CARD / BUTTON SELECTORS =====
@@ -506,8 +600,11 @@ function setNegotiable(val) {
 }
 
 function toggleField(key, show) {
-  const btnYes = document.getElementById(key.slice(0,3) + '-yes') || document.getElementById(key.slice(0,4) + '-yes');
-  const ids = { used: ['used-yes','used-no','usedField'], defects: ['def-yes','def-no','defectsField'], repairs: ['rep-yes','rep-no','repairsField'], reason: ['rsn-yes','rsn-no','reasonField'] };
+  const ids = {
+    defects: ['def-yes','def-no','defectsField'],
+    repairs: ['rep-yes','rep-no','repairsField'],
+    reason:  ['rsn-yes','rsn-no','reasonField']
+  };
   const [yId, nId, fId] = ids[key];
   document.getElementById(yId).classList.toggle('selected', show);
   document.getElementById(nId).classList.toggle('selected', !show);
@@ -531,13 +628,17 @@ function setPickup(val) {
   updateProgress();
 }
 
-function setThree(key, val) {
-  const map = { receipt: ['rcpt-yes','rcpt-no','rcpt-na'], warranty: ['warr-yes','warr-no','warr-na'], packaging: ['pkg-yes','pkg-no','pkg-na'] };
-  const [yId, nId, naId] = map[key];
+// Two-button trust section (no Skip)
+function setTwo(key, val) {
+  const map = {
+    receipt:   ['rcpt-yes','rcpt-no'],
+    warranty:  ['warr-yes','warr-no'],
+    packaging: ['pkg-yes','pkg-no']
+  };
+  const [yId, nId] = map[key];
   document.getElementById(yId).classList.toggle('selected', val === 'yes');
   document.getElementById(nId).classList.toggle('selected', val === 'no');
-  document.getElementById(naId).classList.toggle('selected', val === 'na');
-  if (key === 'receipt') form.receiptAvailable = val;
+  if (key === 'receipt')   form.receiptAvailable = val;
   if (key === 'warranty') {
     form.warrantyRemaining = val;
     document.getElementById('warrantyField').classList.toggle('show', val === 'yes');
@@ -604,7 +705,7 @@ function updateProgress() {
   if (document.getElementById('brand').value.trim() && form.condition) done++;
   if (document.getElementById('sellingPrice').value && form.negotiable !== null && document.getElementById('originalPrice').value) done++;
   if (mediaFiles.filter(m => m.type === 'photo').length > 0) done++;
-  if (form.hasDefects !== null && form.wasRepaired !== null) done++;
+  if (form.usedDuration && form.hasDefects !== null && form.wasRepaired !== null) done++;
   if (form.state && document.getElementById('city').value.trim() && (form.doorDropoff !== null || form.doorPickup !== null)) done++;
   const pct = Math.round((done / total) * 100);
   document.getElementById('progressFill').style.width = pct + '%';
@@ -637,10 +738,13 @@ function validate() {
   const photos = mediaFiles.filter(m => m.type === 'photo');
   show('err-photos', photos.length > 0); if (photos.length === 0) ok = false;
 
+  // Duration is now compulsory
+  show('err-used', !!form.usedDuration); if (!form.usedDuration) ok = false;
+
   show('err-defects', form.hasDefects !== null); if (form.hasDefects === null) ok = false;
   show('err-repairs', form.wasRepaired !== null); if (form.wasRepaired === null) ok = false;
 
-  show('err-state', form.state); if (!form.state) ok = false;
+  show('err-state', !!form.state); if (!form.state) ok = false;
 
   const city = document.getElementById('city').value.trim();
   show('err-city', city); if (!city) ok = false;
@@ -675,7 +779,9 @@ function collectFormData() {
     sellingPrice: document.getElementById('sellingPrice').value,
     negotiable: form.negotiable,
     lowestPrice: document.getElementById('lowestPrice').value,
-    usedDuration: document.getElementById('usedDuration').value.trim(),
+    usedDuration: form.usedDuration,
+    _durationUnit: durationUnit,
+    _durationNumber: document.getElementById('durationNumber').value,
     hasDefects: form.hasDefects,
     defectsDetails: document.getElementById('defectsDetails').value.trim(),
     wasRepaired: form.wasRepaired,
@@ -706,14 +812,13 @@ function loadDraft() {
     const raw = localStorage.getItem('cm_draft_' + userId);
     if (!raw) return;
     const d = JSON.parse(raw);
-    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined && v !== null && v !== '') el.value = v; };
     setVal('itemTitle', d.itemTitle);
     setVal('brand', d.brand);
     setVal('description', d.description);
     setVal('originalPrice', d.originalPrice);
     setVal('sellingPrice', d.sellingPrice);
     setVal('lowestPrice', d.lowestPrice);
-    setVal('usedDuration', d.usedDuration);
     setVal('defectsDetails', d.defectsDetails);
     setVal('repairsDetails', d.repairsDetails);
     setVal('reasonForSelling', d.reasonForSelling);
@@ -736,18 +841,29 @@ function loadDraft() {
       document.querySelectorAll('#conditionCards .card').forEach(c => { if (c.dataset.val === d.condition) c.classList.add('selected'); });
     }
     if (d.negotiable !== null && d.negotiable !== undefined) setNegotiable(d.negotiable);
+    // Restore duration
+    if (d._durationUnit) {
+      setDurationUnit(d._durationUnit);
+      if (d._durationNumber) {
+        document.getElementById('durationNumber').value = d._durationNumber;
+        onDurationNumberInput();
+      }
+    }
     if (d.hasDefects !== null && d.hasDefects !== undefined) toggleField('defects', d.hasDefects);
     if (d.wasRepaired !== null && d.wasRepaired !== undefined) toggleField('repairs', d.wasRepaired);
+    if (d.reasonForSelling) toggleField('reason', true);
     if (d.state) {
       form.state = d.state;
-      document.querySelectorAll('.state-item').forEach(s => { if (s.textContent === d.state) s.classList.add('selected'); });
+      document.getElementById('stateTriggerText').textContent = d.state;
+      document.getElementById('stateTrigger').classList.add('has-value');
+      // Highlight in modal list if already built
+      stateRowEls.forEach(r => { r.classList.toggle('selected', r.dataset.state === d.state); });
     }
     if (d.doorDropoff !== null && d.doorDropoff !== undefined) setDropoff(d.doorDropoff);
     if (d.doorPickup !== null && d.doorPickup !== undefined) setPickup(d.doorPickup);
-    if (d.receiptAvailable) setThree('receipt', d.receiptAvailable);
-    if (d.warrantyRemaining) setThree('warranty', d.warrantyRemaining);
-    if (d.originalPackaging) setThree('packaging', d.originalPackaging);
-    if (d.reasonForSelling) toggleField('reason', true);
+    if (d.receiptAvailable) setTwo('receipt', d.receiptAvailable);
+    if (d.warrantyRemaining) setTwo('warranty', d.warrantyRemaining);
+    if (d.originalPackaging) setTwo('packaging', d.originalPackaging);
 
     updateProgress();
     showToast('Draft loaded!');
@@ -767,12 +883,12 @@ function buildSummary() {
   thumbHtml += '</div>';
 
   const rows = [
-    { title: 'Basic Info', id: 'sec1', rows: `<strong>Title:</strong> ${d.itemTitle}<br><strong>Category:</strong> ${d.category} > ${d.subcategory}<br><strong>Brand:</strong> ${d.brand}<br><strong>Condition:</strong> ${d.condition}<br><strong>Description:</strong> ${d.description || 'N/A'}` },
+    { title: 'Basic Info', id: 'sec1', rows: `<strong>Title:</strong> ${d.itemTitle}<br><strong>Category:</strong> ${d.category} › ${d.subcategory}<br><strong>Brand:</strong> ${d.brand}<br><strong>Condition:</strong> ${d.condition}<br><strong>Description:</strong> ${d.description || 'N/A'}` },
     { title: 'Pricing', id: 'sec2', rows: `<strong>Original Price:</strong> ₦${parseInt(d.originalPrice||0).toLocaleString()}<br><strong>Selling Price:</strong> ₦${parseInt(d.sellingPrice||0).toLocaleString()}<br><strong>Negotiable:</strong> ${neg}` },
     { title: 'Photos & Media', id: 'sec3', rows: `${photos.length} photo(s), ${videos.length} video(s)${thumbHtml}` },
     { title: 'Condition Details', id: 'sec4', rows: `<strong>Used For:</strong> ${d.usedDuration || 'N/A'}<br><strong>Defects:</strong> ${d.hasDefects ? (d.defectsDetails || 'Yes') : 'None'}<br><strong>Repairs:</strong> ${d.wasRepaired ? (d.repairsDetails || 'Yes') : 'None'}<br><strong>Reason:</strong> ${d.reasonForSelling || 'N/A'}` },
     { title: 'Location & Delivery', id: 'sec5', rows: `<strong>State:</strong> ${d.state}<br><strong>City:</strong> ${d.city}<br><strong>Door Dropoff:</strong> ${d.doorDropoff ? 'Yes' : 'No'}<br><strong>Door Pickup:</strong> ${d.doorPickup ? 'Yes' : 'No'}` },
-    { title: 'Trust & Verification', id: 'sec6', rows: `<strong>Receipt:</strong> ${d.receiptAvailable || 'Skipped'}<br><strong>Warranty:</strong> ${d.warrantyRemaining === 'yes' ? (d.warrantyDuration || 'Yes') : (d.warrantyRemaining || 'Skipped')}<br><strong>Packaging:</strong> ${d.originalPackaging || 'Skipped'}` }
+    { title: 'Trust & Verification', id: 'sec6', rows: `<strong>Receipt:</strong> ${d.receiptAvailable || 'Not answered'}<br><strong>Warranty:</strong> ${d.warrantyRemaining === 'yes' ? (d.warrantyDuration || 'Yes') : (d.warrantyRemaining || 'Not answered')}<br><strong>Packaging:</strong> ${d.originalPackaging || 'Not answered'}` }
   ];
 
   const container = document.getElementById('summaryContainer');
@@ -801,27 +917,27 @@ async function submitListing() {
   try {
     const data = collectFormData();
 
-    // Build multipart/form-data — photos/videos go as real file uploads
     const fd = new FormData();
     Object.entries(data).forEach(([k, v]) => {
       if (v !== null && v !== undefined) fd.append(k, String(v));
     });
     fd.append('userId', userId);
 
-    // Append actual File objects (not base64)
     mediaFiles.forEach(m => {
       fd.append('media', m.file, m.file.name);
     });
 
-    // DO NOT set Content-Type header — browser sets it with boundary automatically
     const res = await fetch('https://campusmarketplace-production-06b3.up.railway.app/api/submit-listing', {
       method: 'POST',
       body: fd
     });
 
-    if (!res.ok) throw new Error('Server error');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Server error');
+    }
 
-    // Clear draft
+    // Clear draft on success
     try { localStorage.removeItem('cm_draft_' + userId); } catch(e) {}
 
     if (window.Telegram && Telegram.WebApp) {
