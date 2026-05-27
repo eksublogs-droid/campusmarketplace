@@ -2,7 +2,7 @@ const User = require('../models/User');
 const SellerSubmission = require('../models/SellerSubmission');
 const Product = require('../models/Product');
 const Settings = require('../models/Settings');
-const { mainMenu, planSelection, proDayOptions, proceedPayment, submitToAdmin } = require('../utils/keyboard');
+const { mainMenu, planSelection, proDayOptions } = require('../utils/keyboard');
 const { showProducts, searchProducts } = require('./product');
 const { initiatePayment } = require('./payment');
 const { setSession, updateSession, getSession, clearSession } = require('../utils/session');
@@ -23,20 +23,17 @@ async function handleBuyFlow(bot, chatId, user) {
 // ========== SELL FLOW ==========
 async function startSellFlow(bot, chatId, user) {
   const planMsg =
-    `💎 *WHY GO PRO?*\n\n` +
-    `🆓 *Free gets you:*\n` +
+    `💎 *Choose Your Plan*\n\n` +
+    `🆓 *Free Plan:*\n` +
     `✅ WhatsApp Status\n` +
     `✅ Telegram Status\n\n` +
-    `⭐ *Pro gets you EVERYTHING +:*\n` +
-    `✅ WhatsApp Status\n` +
-    `✅ Telegram Status\n` +
+    `⭐ *Pro Plan (₦1,000/day):*\n` +
+    `✅ Everything in Free +\n` +
     `✅ 30+ WhatsApp Groups\n` +
-    `✅ Facebook Group 140k\n` +
-    `✅ Telegram Group 5.2k\n` +
-    `✅ First On Listings\n` +
-    `🚀 Find buyers up to *5x faster!*\n\n` +
-    `💰 Just *₦1,000/day*\n\n` +
-    `Don't let your item sit for weeks.\n` +
+    `✅ Facebook Group (140k members)\n` +
+    `✅ Telegram Group (5.2k members)\n` +
+    `✅ First position on all listings\n` +
+    `🚀 Sell up to *5x faster!*\n\n` +
     `Serious sellers choose Pro ⭐`;
 
   await bot.sendMessage(chatId, planMsg, {
@@ -47,11 +44,25 @@ async function startSellFlow(bot, chatId, user) {
   setSession(chatId, 'select_plan');
 }
 
-async function handlePlanSelection(bot, chatId, plan) {
+async function handlePlanSelection(bot, chatId, plan, user) {
   if (plan === 'free') {
-    setSession(chatId, 'sell_product_name');
     updateSession(chatId, { plan: 'free' });
-    return bot.sendMessage(chatId, '✅ Free plan selected. Let\'s add your product!\n\n📦 What is the product name?');
+    setSession(chatId, 'awaiting_miniapp');
+
+    const miniAppUrl = `https://eksublogs-droid.github.io/campusmarketplace/miniapp/?userId=${user.telegramId}&plan=free`;
+
+    await bot.sendMessage(chatId,
+      `✅ *Free Plan Selected!*\n\nTap below to fill your listing form.\nTakes about 3–5 minutes.`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '📋 Open Listing Form', web_app: { url: miniAppUrl } }
+          ]]
+        }
+      }
+    );
+    return;
   }
 
   // Pro selected
@@ -63,213 +74,164 @@ async function handlePlanSelection(bot, chatId, plan) {
   );
 }
 
-async function handleProDays(bot, chatId, days) {
+async function handleProDays(bot, chatId, days, user) {
   const settings = await Settings.findOne() || new Settings();
   const pricePerDay = settings.proPricePerDay || 1000;
   const amount = days * pricePerDay;
 
+  updateSession(chatId, { promoDays: days, proAmount: amount });
+  setSession(chatId, 'awaiting_miniapp');
+
+  const miniAppUrl = `https://eksublogs-droid.github.io/campusmarketplace/miniapp/?userId=${user.telegramId}&plan=pro&days=${days}&amount=${amount}`;
+
   const summary =
     `📋 *Pro Plan Summary*\n` +
-    `Days: ${days}\n` +
-    `Price: ₦${amount.toLocaleString()}\n` +
-    `What you get: First on listings + all promotion channels`;
+    `Duration : ${days} day${days > 1 ? 's' : ''}\n` +
+    `Total    : ₦${amount.toLocaleString()}\n\n` +
+    `What you get:\n` +
+    `✅ First position on all listings\n` +
+    `✅ 30+ WhatsApp groups\n` +
+    `✅ Facebook group (140k members)\n` +
+    `✅ Telegram group (5.2k members)\n\n` +
+    `Fill your listing form first, then complete payment after.`;
 
   await bot.sendMessage(chatId, summary, {
     parse_mode: 'Markdown',
-    reply_markup: proceedPayment()
-  });
-
-  setSession(chatId, 'awaiting_payment');
-  updateSession(chatId, { promoDays: days });
-}
-
-async function proceedWithPaymentForPro(bot, chatId, user) {
-  const session = getSession(chatId);
-  if (!session || !session.data) {
-    return bot.sendMessage(chatId, '❌ Session expired. Please start over from the main menu.');
-  }
-
-  const days = session.data.promoDays;
-  if (!days || isNaN(days) || days <= 0) {
-    return bot.sendMessage(chatId, '❌ Could not read your selected days. Please start over.');
-  }
-
-  const settings = await Settings.findOne() || new Settings();
-  const pricePerDay = settings.proPricePerDay || 1000;
-
-  // initiatePayment sets session to 'awaiting_receipt' — do NOT overwrite after this
-  await initiatePayment(bot, chatId, user, days, pricePerDay);
-}
-
-// After payment approved, start product form
-async function startProductForm(bot, chatId) {
-  setSession(chatId, 'sell_product_name');
-  await bot.sendMessage(chatId, '✅ Great! Let\'s add your product.\n\n📦 What is the product name?');
-}
-
-// ========== PRODUCT FORM STEPS ==========
-async function handleProductFormStep(bot, chatId, text) {
-  const session = getSession(chatId);
-  if (!session) return bot.sendMessage(chatId, '❌ Session expired. Start over.');
-
-  const step = session.step;
-  const data = session.data || {};
-
-  switch (step) {
-    case 'sell_product_name':
-      updateSession(chatId, { productName: text });
-      setSession(chatId, 'sell_product_media');
-      return bot.sendMessage(chatId, '📸 Upload photos and/or videos (send multiple, type DONE when finished):');
-
-    case 'sell_product_media':
-      if (text.toLowerCase() === 'done') {
-        if (!data.productMedia || data.productMedia.length === 0) {
-          return bot.sendMessage(chatId, '⚠️ Please upload at least one photo or video.');
-        }
-        setSession(chatId, 'sell_product_details');
-        return bot.sendMessage(chatId, '📝 Enter custom details (brand, condition, age, etc):');
-      }
-      return;
-
-    case 'sell_product_details':
-      updateSession(chatId, { productDetails: text });
-      setSession(chatId, 'sell_product_description');
-      return bot.sendMessage(chatId, '📄 Enter product description:');
-
-    case 'sell_product_description':
-      updateSession(chatId, { productDescription: text });
-      setSession(chatId, 'sell_product_location');
-      return bot.sendMessage(chatId, '📍 Where is the product located?');
-
-    case 'sell_product_location':
-      updateSession(chatId, { productLocation: text });
-      setSession(chatId, 'sell_product_price');
-      return bot.sendMessage(chatId, '💰 What is your asking price? (₦)');
-
-    case 'sell_product_price': {
-      const price = parseInt(text);
-      if (isNaN(price) || price <= 0) {
-        return bot.sendMessage(chatId, '❌ Please enter a valid number.');
-      }
-      updateSession(chatId, { productPrice: price });
-      setSession(chatId, 'sell_product_lastprice');
-      return bot.sendMessage(chatId, '💸 What is your lowest/last price? (₦)');
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '📋 Open Listing Form', web_app: { url: miniAppUrl } }
+      ]]
     }
-
-    case 'sell_product_lastprice': {
-      const lastPrice = parseInt(text);
-      if (isNaN(lastPrice) || lastPrice <= 0) {
-        return bot.sendMessage(chatId, '❌ Please enter a valid number.');
-      }
-      updateSession(chatId, { productLastPrice: lastPrice });
-
-      await bot.sendMessage(chatId,
-        '⚠️ *Pricing Tip:* Items priced too high sit for months with no buyers. ' +
-        'A fair price means faster sale and quicker cash. Consider pricing competitively!',
-        { parse_mode: 'Markdown' }
-      );
-
-      await showProductSummary(bot, chatId);
-      return;
-    }
-  }
-}
-
-async function handleMediaUpload(bot, chatId, file_id, mediaType) {
-  const session = getSession(chatId);
-  if (!session || session.step !== 'sell_product_media') {
-    return bot.sendMessage(chatId, '❌ Not in the right step. Type DONE to proceed.');
-  }
-
-  if (!session.data.productMedia) session.data.productMedia = [];
-  session.data.productMedia.push({ file_id, type: mediaType });
-  updateSession(chatId, { productMedia: session.data.productMedia });
-
-  await bot.sendMessage(chatId, `✅ Media added (${session.data.productMedia.length} file(s)). Send more or type DONE.`);
-}
-
-async function showProductSummary(bot, chatId) {
-  const session = getSession(chatId);
-  const d = session.data;
-
-  const summary =
-    `📦 *Product Summary*\n` +
-    `─────────────────\n` +
-    `Product: ${d.productName}\n` +
-    `📸 Media: ${d.productMedia?.length || 0} file(s)\n` +
-    `📝 Details: ${d.productDetails}\n` +
-    `📄 Description: ${d.productDescription}\n` +
-    `📍 Location: ${d.productLocation}\n` +
-    `💰 Asking: ₦${d.productPrice?.toLocaleString() || 'N/A'}\n` +
-    `💸 Last: ₦${d.productLastPrice?.toLocaleString() || 'N/A'}\n` +
-    `📋 Plan: ${d.plan === 'pro' ? `Pro (${d.promoDays} days)` : 'Free'}`;
-
-  await bot.sendMessage(chatId, summary, {
-    parse_mode: 'Markdown',
-    reply_markup: submitToAdmin()
   });
-
-  setSession(chatId, 'awaiting_submit');
 }
 
-async function submitProductToAdmin(bot, chatId, user) {
-  const session = getSession(chatId);
-  const d = session.data;
+// ========== AFTER MINI APP SUBMITS ==========
+// Called by POST /api/submit-listing in index.js
+async function handleMiniAppSubmission(bot, userId, formData, settings) {
+  const user = await User.findOne({ telegramId: userId });
+  if (!user) return;
 
-  const settings = await Settings.findOne() || new Settings();
-  const pricePerDay = settings.proPricePerDay || 1000;
+  const plan = formData.plan || 'free';
+  const days = parseInt(formData.days) || 0;
+  const amount = parseInt(formData.amount) || 0;
+  const pricePerDay = (settings && settings.proPricePerDay) || 1000;
 
   const submission = new SellerSubmission({
-    telegramId:     user.telegramId,
-    firstName:      user.firstName,
-    username:       user.username,
-    gmail:          user.gmail,
-    whatsappNumber: user.whatsapp || 'N/A',
-    productName:    d.productName,
-    media:          d.productMedia || [],
-    details:        d.productDetails,
-    description:    d.productDescription,
-    location:       d.productLocation,
-    askingPrice:    d.productPrice,
-    lastPrice:      d.productLastPrice,
-    plan:           d.plan,
-    premiumDays:    d.plan === 'pro' ? d.promoDays : 0,
-    premiumPrice:   d.plan === 'pro' ? (d.promoDays * pricePerDay) : 0,
-    paymentStatus:  d.plan === 'pro' ? 'paid' : 'not_needed',
-    approvalStatus: 'pending'
+    telegramId:       user.telegramId,
+    firstName:        user.firstName,
+    username:         user.username,
+    gmail:            user.gmail,
+    whatsappNumber:   user.whatsapp || 'N/A',
+    productName:      formData.itemTitle || '',
+    media:            formData.media || [],
+    description:      formData.description || '',
+    category:         formData.category || '',
+    subcategory:      formData.subcategory || '',
+    brand:            formData.brand || '',
+    condition:        formData.condition || '',
+    originalPrice:    parseInt(formData.originalPrice) || 0,
+    sellingPrice:     parseInt(formData.sellingPrice) || 0,
+    negotiable:       formData.negotiable === true || formData.negotiable === 'true',
+    lowestPrice:      parseInt(formData.lowestPrice) || 0,
+    usedDuration:     formData.usedDuration || '',
+    hasDefects:       formData.hasDefects === true || formData.hasDefects === 'true',
+    defectsDetails:   formData.defectsDetails || '',
+    wasRepaired:      formData.wasRepaired === true || formData.wasRepaired === 'true',
+    repairsDetails:   formData.repairsDetails || '',
+    reasonForSelling: formData.reasonForSelling || '',
+    state:            formData.state || '',
+    city:             formData.city || '',
+    doorDropoff:      formData.doorDropoff === true || formData.doorDropoff === 'true',
+    doorPickup:       formData.doorPickup === true || formData.doorPickup === 'true',
+    receiptAvailable: formData.receiptAvailable || '',
+    warrantyRemaining:formData.warrantyRemaining || '',
+    warrantyDuration: formData.warrantyDuration || '',
+    originalPackaging:formData.originalPackaging || '',
+    plan:             plan,
+    premiumDays:      plan === 'pro' ? days : 0,
+    premiumPrice:     plan === 'pro' ? amount : 0,
+    paymentStatus:    plan === 'pro' ? 'pending' : 'not_needed',
+    approvalStatus:   'pending'
   });
 
   await submission.save();
-  clearSession(chatId);
+  clearSession(userId);
 
-  await bot.sendMessage(chatId,
-    '📤 *Product submitted for approval!*\n\n' +
-    'We\'ll review it and notify you soon via email and Telegram.\n\n' +
-    '🏠 Back to main menu',
-    {
-      reply_markup: { inline_keyboard: [[{ text: '🏠 Main Menu', callback_data: 'main_menu' }]] }
+  if (plan === 'free') {
+    await bot.sendMessage(userId,
+      `✅ *Listing Submitted!*\n\n` +
+      `We will review it and notify you here on Telegram and via email once approved.\n` +
+      `Usually reviewed within 24 hours.`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🏠 Main Menu', callback_data: 'main_menu' }]] }
+      }
+    );
+  } else {
+    if (settings && settings.bankAccounts && settings.bankAccounts.length > 0) {
+      const bank = settings.bankAccounts.find(b => b.active) || settings.bankAccounts[0];
+      await bot.sendMessage(userId,
+        `📋 *Form Received! Now Complete Payment:*\n\n` +
+        `Bank         : ${bank.bankName}\n` +
+        `Account No   : ${bank.accountNumber}\n` +
+        `Account Name : ${bank.accountName}\n` +
+        `Amount       : ₦${amount.toLocaleString()}\n\n` +
+        `Send your payment screenshot here after paying.`,
+        { parse_mode: 'Markdown' }
+      );
+      setSession(userId, 'awaiting_receipt');
+      updateSession(userId, { plan: 'pro', promoDays: days, proAmount: amount, submissionId: submission._id.toString() });
+    } else {
+      await bot.sendMessage(userId,
+        `📋 *Form Received!*\n\nPlease contact admin to complete your Pro payment of ₦${amount.toLocaleString()}.`,
+        { parse_mode: 'Markdown' }
+      );
     }
-  );
+  }
 
   await notifyAdminNewSubmission(bot, submission);
 }
 
 async function notifyAdminNewSubmission(bot, submission) {
   const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID);
+
+  const neg = submission.negotiable
+    ? `Yes (Min: ₦${submission.lowestPrice.toLocaleString()})`
+    : 'No';
+
   const notif =
-    `🆕 *NEW SELLER SUBMISSION*\n\n` +
-    `👤 Name: ${submission.firstName}\n` +
-    `🆔 Username: @${submission.username || 'N/A'}\n` +
-    `🔢 Telegram ID: ${submission.telegramId}\n` +
-    `📧 Gmail: ${submission.gmail}\n` +
-    `📱 Seller WhatsApp: ${submission.whatsappNumber}\n\n` +
-    `📦 Product: ${submission.productName}\n` +
-    `📝 Details: ${submission.details}\n` +
-    `📄 Description: ${submission.description}\n` +
-    `📍 Location: ${submission.location}\n` +
-    `💰 Asking: ₦${submission.askingPrice.toLocaleString()}\n` +
-    `💸 Last: ₦${submission.lastPrice.toLocaleString()}\n` +
-    `📋 Plan: ${submission.plan === 'pro' ? `Pro (${submission.premiumDays} days)` : 'Free'}`;
+    `🆕 *NEW SELLER SUBMISSION*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `👤 Name      : ${submission.firstName}\n` +
+    `🆔 Username  : @${submission.username || 'N/A'}\n` +
+    `🔢 Telegram  : ${submission.telegramId}\n` +
+    `📧 Gmail     : ${submission.gmail}\n` +
+    `📱 WhatsApp  : ${submission.whatsappNumber}\n` +
+    `📋 Plan      : ${submission.plan === 'pro' ? `Pro (${submission.premiumDays} days)` : 'Free'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📦 Title     : ${submission.productName}\n` +
+    `🗂 Category  : ${submission.category} > ${submission.subcategory}\n` +
+    `🏷 Brand     : ${submission.brand}\n` +
+    `⚙️ Condition : ${submission.condition}\n` +
+    `📄 Desc      : ${submission.description || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💵 Orig Price : ₦${submission.originalPrice.toLocaleString()}\n` +
+    `💰 Selling   : ₦${submission.sellingPrice.toLocaleString()}\n` +
+    `🤝 Negotiable: ${neg}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⏱ Used For  : ${submission.usedDuration || 'N/A'}\n` +
+    `🔧 Defects   : ${submission.hasDefects ? (submission.defectsDetails || 'Yes') : 'None'}\n` +
+    `🛠 Repairs   : ${submission.wasRepaired ? (submission.repairsDetails || 'Yes') : 'None'}\n` +
+    `❓ Reason    : ${submission.reasonForSelling || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📍 State     : ${submission.state}\n` +
+    `🏙 City      : ${submission.city}\n` +
+    `🚚 Dropoff   : ${submission.doorDropoff ? 'Yes' : 'No'}\n` +
+    `🚶 Pickup    : ${submission.doorPickup ? 'Yes' : 'No'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🧾 Receipt   : ${submission.receiptAvailable || 'N/A'}\n` +
+    `🛡 Warranty  : ${submission.warrantyRemaining === 'yes' ? (submission.warrantyDuration || 'Yes') : (submission.warrantyRemaining || 'N/A')}\n` +
+    `📦 Packaging : ${submission.originalPackaging || 'N/A'}`;
 
   await bot.sendMessage(adminId, notif, {
     parse_mode: 'Markdown',
@@ -283,11 +245,20 @@ async function notifyAdminNewSubmission(bot, submission) {
 
   if (submission.media && submission.media.length > 0) {
     for (const m of submission.media) {
-      if (m.type === 'video') await bot.sendVideo(adminId, m.file_id);
-      else await bot.sendPhoto(adminId, m.file_id);
+      if (m.type === 'video') await bot.sendVideo(adminId, m.file_id).catch(() => {});
+      else await bot.sendPhoto(adminId, m.file_id).catch(() => {});
     }
   }
 }
+
+// Legacy stubs kept so existing imports in index.js don't break
+async function startProductForm(bot, chatId) {
+  await bot.sendMessage(chatId, '❌ Please use the listing form button to submit your item.');
+}
+async function handleProductFormStep(bot, chatId, text) {}
+async function handleMediaUpload(bot, chatId, file_id, mediaType) {}
+async function showProductSummary(bot, chatId) {}
+async function submitProductToAdmin(bot, chatId, user) {}
 
 module.exports = {
   showMainMenu,
@@ -295,11 +266,12 @@ module.exports = {
   startSellFlow,
   handlePlanSelection,
   handleProDays,
-  proceedWithPaymentForPro,
+  handleMiniAppSubmission,
+  notifyAdminNewSubmission,
+  // legacy stubs
   startProductForm,
   handleProductFormStep,
   handleMediaUpload,
   showProductSummary,
-  submitProductToAdmin,
-  notifyAdminNewSubmission
+  submitProductToAdmin
 };
