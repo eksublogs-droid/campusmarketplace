@@ -50,11 +50,13 @@ async function startSellFlow(bot, chatId, user) {
 async function handlePlanSelection(bot, chatId, plan) {
   if (plan === 'free') {
     setSession(chatId, 'sell_product_name');
+    updateSession(chatId, { plan: 'free' });
     return bot.sendMessage(chatId, '✅ Free plan selected. Let\'s add your product!\n\n📦 What is the product name?');
   }
 
   // Pro selected
   setSession(chatId, 'select_pro_days');
+  updateSession(chatId, { plan: 'pro' });
   await bot.sendMessage(chatId,
     `⭐ *Pro Plan Selected*\n\nHow many days would you like to promote your listing?`,
     { parse_mode: 'Markdown', reply_markup: proDayOptions() }
@@ -66,7 +68,6 @@ async function handleProDays(bot, chatId, days) {
   const pricePerDay = settings.proPricePerDay || 1000;
   const amount = days * pricePerDay;
 
-  const user = await User.findOne({ telegramId: chatId });
   const summary =
     `📋 *Pro Plan Summary*\n` +
     `Days: ${days}\n` +
@@ -78,9 +79,8 @@ async function handleProDays(bot, chatId, days) {
     reply_markup: proceedPayment()
   });
 
-  // setSession must come BEFORE updateSession — setSession resets data:{} and would wipe promoDays/plan
   setSession(chatId, 'awaiting_payment');
-  updateSession(chatId, { plan: 'pro', promoDays: days });
+  updateSession(chatId, { promoDays: days });
 }
 
 async function proceedWithPaymentForPro(bot, chatId, user) {
@@ -97,11 +97,11 @@ async function proceedWithPaymentForPro(bot, chatId, user) {
   const settings = await Settings.findOne() || new Settings();
   const pricePerDay = settings.proPricePerDay || 1000;
 
-  // initiatePayment already sets session to 'awaiting_receipt' — do NOT overwrite it here
+  // initiatePayment sets session to 'awaiting_receipt' — do NOT overwrite after this
   await initiatePayment(bot, chatId, user, days, pricePerDay);
 }
 
-// After payment confirmed, start product form
+// After payment approved, start product form
 async function startProductForm(bot, chatId) {
   setSession(chatId, 'sell_product_name');
   await bot.sendMessage(chatId, '✅ Great! Let\'s add your product.\n\n📦 What is the product name?');
@@ -129,7 +129,7 @@ async function handleProductFormStep(bot, chatId, text) {
         setSession(chatId, 'sell_product_details');
         return bot.sendMessage(chatId, '📝 Enter custom details (brand, condition, age, etc):');
       }
-      return; // Wait for media
+      return;
 
     case 'sell_product_details':
       updateSession(chatId, { productDetails: text });
@@ -143,19 +143,6 @@ async function handleProductFormStep(bot, chatId, text) {
 
     case 'sell_product_location':
       updateSession(chatId, { productLocation: text });
-      setSession(chatId, 'sell_product_whatsapp');
-      await bot.sendMessage(chatId, '📱 Which WhatsApp number should buyers use?', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '📱 Use Default (+2348137890167)', callback_data: 'wa_default' }],
-            [{ text: '✏️ Type Custom Number', callback_data: 'wa_custom' }]
-          ]
-        }
-      });
-      return;
-
-    case 'sell_product_whatsapp_custom':
-      updateSession(chatId, { productWhatsapp: text });
       setSession(chatId, 'sell_product_price');
       return bot.sendMessage(chatId, '💰 What is your asking price? (₦)');
 
@@ -213,7 +200,6 @@ async function showProductSummary(bot, chatId) {
     `📝 Details: ${d.productDetails}\n` +
     `📄 Description: ${d.productDescription}\n` +
     `📍 Location: ${d.productLocation}\n` +
-    `📱 WhatsApp: ${d.productWhatsapp || '+2348137890167'}\n` +
     `💰 Asking: ₦${d.productPrice?.toLocaleString() || 'N/A'}\n` +
     `💸 Last: ₦${d.productLastPrice?.toLocaleString() || 'N/A'}\n` +
     `📋 Plan: ${d.plan === 'pro' ? `Pro (${d.promoDays} days)` : 'Free'}`;
@@ -234,22 +220,22 @@ async function submitProductToAdmin(bot, chatId, user) {
   const pricePerDay = settings.proPricePerDay || 1000;
 
   const submission = new SellerSubmission({
-    telegramId: user.telegramId,
-    firstName: user.firstName,
-    username: user.username,
-    gmail: user.gmail,
-    whatsappNumber: d.productWhatsapp || '+2348137890167',
-    productName: d.productName,
-    media: d.productMedia || [],
-    details: d.productDetails,
-    description: d.productDescription,
-    location: d.productLocation,
-    askingPrice: d.productPrice,
-    lastPrice: d.productLastPrice,
-    plan: d.plan,
-    premiumDays: d.plan === 'pro' ? d.promoDays : 0,
-    premiumPrice: d.plan === 'pro' ? (d.promoDays * pricePerDay) : 0,
-    paymentStatus: d.plan === 'pro' ? 'paid' : 'not_needed',
+    telegramId:     user.telegramId,
+    firstName:      user.firstName,
+    username:       user.username,
+    gmail:          user.gmail,
+    whatsappNumber: user.whatsapp || 'N/A',
+    productName:    d.productName,
+    media:          d.productMedia || [],
+    details:        d.productDetails,
+    description:    d.productDescription,
+    location:       d.productLocation,
+    askingPrice:    d.productPrice,
+    lastPrice:      d.productLastPrice,
+    plan:           d.plan,
+    premiumDays:    d.plan === 'pro' ? d.promoDays : 0,
+    premiumPrice:   d.plan === 'pro' ? (d.promoDays * pricePerDay) : 0,
+    paymentStatus:  d.plan === 'pro' ? 'paid' : 'not_needed',
     approvalStatus: 'pending'
   });
 
@@ -265,7 +251,6 @@ async function submitProductToAdmin(bot, chatId, user) {
     }
   );
 
-  // Notify admin
   await notifyAdminNewSubmission(bot, submission);
 }
 
@@ -276,29 +261,26 @@ async function notifyAdminNewSubmission(bot, submission) {
     `👤 Name: ${submission.firstName}\n` +
     `🆔 Username: @${submission.username || 'N/A'}\n` +
     `🔢 Telegram ID: ${submission.telegramId}\n` +
-    `📧 Gmail: ${submission.gmail}\n\n` +
+    `📧 Gmail: ${submission.gmail}\n` +
+    `📱 Seller WhatsApp: ${submission.whatsappNumber}\n\n` +
     `📦 Product: ${submission.productName}\n` +
     `📝 Details: ${submission.details}\n` +
     `📄 Description: ${submission.description}\n` +
     `📍 Location: ${submission.location}\n` +
     `💰 Asking: ₦${submission.askingPrice.toLocaleString()}\n` +
     `💸 Last: ₦${submission.lastPrice.toLocaleString()}\n` +
-    `📱 WhatsApp: ${submission.whatsappNumber}\n` +
     `📋 Plan: ${submission.plan === 'pro' ? `Pro (${submission.premiumDays} days)` : 'Free'}`;
 
   await bot.sendMessage(adminId, notif, {
     parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '✅ Approve', callback_data: `approve_${submission._id}` },
-          { text: '❌ Reject', callback_data: `reject_${submission._id}` }
-        ]
-      ]
+      inline_keyboard: [[
+        { text: '✅ Approve', callback_data: `approve_${submission._id}` },
+        { text: '❌ Reject', callback_data: `reject_${submission._id}` }
+      ]]
     }
   });
 
-  // Send media
   if (submission.media && submission.media.length > 0) {
     for (const m of submission.media) {
       if (m.type === 'video') await bot.sendVideo(adminId, m.file_id);
