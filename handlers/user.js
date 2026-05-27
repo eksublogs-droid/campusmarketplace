@@ -234,38 +234,49 @@ async function notifyAdminNewSubmission(bot, submission) {
     `🛡 Warranty  : ${submission.warrantyRemaining === 'yes' ? (submission.warrantyDuration || 'Yes') : (submission.warrantyRemaining || 'N/A')}\n` +
     `📦 Packaging : ${submission.originalPackaging || 'N/A'}`;
 
-  if (submission.media && submission.media.length > 0) {
-    if (submission.media.length === 1) {
-      const m = submission.media[0];
-      const opts = { caption: notif, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: `approve_${submission._id}` }, { text: '❌ Reject', callback_data: `reject_${submission._id}` }]] } };
-      if (m.type === 'video') await bot.sendVideo(adminId, m.file_id, opts).catch(() => {});
-      else await bot.sendPhoto(adminId, m.file_id, opts).catch(() => {});
-    } else {
-      const mediaGroup = submission.media.slice(0, 10).map((m, i) => ({
+  const actionKeyboard = {
+    inline_keyboard: [[
+      { text: '✅ Approve', callback_data: `approve_${submission._id}` },
+      { text: '❌ Reject', callback_data: `reject_${submission._id}` }
+    ]]
+  };
+
+  const validMedia = (submission.media || []).filter(m => m && m.file_id);
+  let mediaSent = false;
+
+  if (validMedia.length === 1) {
+    const m = validMedia[0];
+    const opts = { caption: notif, parse_mode: 'Markdown', reply_markup: actionKeyboard };
+    try {
+      if (m.type === 'video') await bot.sendVideo(adminId, m.file_id, opts);
+      else await bot.sendPhoto(adminId, m.file_id, opts);
+      mediaSent = true;
+    } catch (err) {
+      console.error('Admin single media send failed:', err.message);
+    }
+  } else if (validMedia.length > 1) {
+    try {
+      const mediaGroup = validMedia.slice(0, 10).map((m, i) => ({
         type: m.type === 'video' ? 'video' : 'photo',
         media: m.file_id,
         ...(i === 0 ? { caption: notif, parse_mode: 'Markdown' } : {})
       }));
-      await bot.sendMediaGroup(adminId, mediaGroup).catch(() => {});
+      await bot.sendMediaGroup(adminId, mediaGroup);
       await bot.sendMessage(adminId, `📋 Actions for *${submission.productName}*:`, {
         parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Approve', callback_data: `approve_${submission._id}` },
-            { text: '❌ Reject', callback_data: `reject_${submission._id}` }
-          ]]
-        }
+        reply_markup: actionKeyboard
       });
+      mediaSent = true;
+    } catch (err) {
+      console.error('Admin media group send failed:', err.message);
     }
-  } else {
+  }
+
+  // Always guarantee admin gets the notification + action buttons
+  if (!mediaSent) {
     await bot.sendMessage(adminId, notif, {
       parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [[
-          { text: '✅ Approve', callback_data: `approve_${submission._id}` },
-          { text: '❌ Reject', callback_data: `reject_${submission._id}` }
-        ]]
-      }
+      reply_markup: actionKeyboard
     });
   }
 }
