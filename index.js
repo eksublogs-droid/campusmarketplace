@@ -113,12 +113,29 @@ async function uploadToTelegram(fileBuffer, mimeType, filename) {
   if (!storageChannelId) throw new Error('STORAGE_CHANNEL_ID not set in .env');
 
   const isVideo = mimeType && mimeType.startsWith('video');
+  const fileSizeMB = fileBuffer.length / (1024 * 1024);
+
+  console.log(`⬆️ Uploading ${filename} (${fileSizeMB.toFixed(1)}MB, ${mimeType})`);
+
+  // Telegram photo limit is 10MB. If larger, send as document so it's stored.
+  // We still track it as 'photo' type for display — Telegram compresses on its side.
+  // For videos, limit is 50MB.
+  if (!isVideo && fileSizeMB > 10) {
+    console.warn(`⚠️ Photo ${filename} is ${fileSizeMB.toFixed(1)}MB > 10MB, sending as document`);
+    const msg = await bot.sendDocument(storageChannelId, fileBuffer, {}, {
+      filename: filename || 'photo.jpg',
+      contentType: mimeType || 'image/jpeg'
+    });
+    // Use the document file_id — won't render inline as photo but will store
+    return { file_id: msg.document.file_id, type: 'photo' };
+  }
 
   if (isVideo) {
     const msg = await bot.sendVideo(storageChannelId, fileBuffer, {}, {
       filename: filename || 'video.mp4',
       contentType: mimeType || 'video/mp4'
     });
+    console.log(`✅ Video uploaded: ${msg.video.file_id.substring(0, 20)}...`);
     return { file_id: msg.video.file_id, type: 'video' };
   } else {
     const msg = await bot.sendPhoto(storageChannelId, fileBuffer, {}, {
@@ -126,45 +143,53 @@ async function uploadToTelegram(fileBuffer, mimeType, filename) {
       contentType: mimeType || 'image/jpeg'
     });
     const photos = msg.photo;
-    return { file_id: photos[photos.length - 1].file_id, type: 'photo' };
+    const file_id = photos[photos.length - 1].file_id;
+    console.log(`✅ Photo uploaded: ${file_id.substring(0, 20)}...`);
+    return { file_id, type: 'photo' };
   }
 }
 
 // ========== MINI APP SUBMISSION ENDPOINT ==========
 app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
-  try {
-    const { userId, plan, days, amount, ...formFields } = req.body;
+  const { userId, plan, days, amount, ...formFields } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'userId required' });
-    }
-
-    const mediaArray = [];
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        try {
-          const result = await uploadToTelegram(file.buffer, file.mimetype, file.originalname);
-          mediaArray.push(result);
-        } catch (uploadErr) {
-          console.error('❌ Telegram upload error:', uploadErr.message);
-        }
-      }
-    }
-
-    const settings = await Settings.findOne();
-
-    await handleMiniAppSubmission(
-      bot,
-      parseInt(userId),
-      { plan, days, amount, ...formFields, media: mediaArray },
-      settings
-    );
-
-    return res.json({ success: true });
-  } catch (err) {
-    console.error('❌ submit-listing error:', err);
-    return res.status(500).json({ error: 'Internal server error' });
+  if (!userId) {
+    return res.status(400).json({ error: 'userId required' });
   }
+
+  // Respond immediately so the client never times out
+  res.json({ success: true });
+
+  // Process everything in the background
+  (async () => {
+    try {
+      const mediaArray = [];
+      if (req.files && req.files.length > 0) {
+        // Upload all media in parallel for speed
+        const uploads = await Promise.allSettled(
+          req.files.map(file => uploadToTelegram(file.buffer, file.mimetype, file.originalname))
+        );
+        uploads.forEach((result, i) => {
+          if (result.status === 'fulfilled') {
+            mediaArray.push(result.value);
+          } else {
+            console.error(`❌ Telegram upload error for file ${i}:`, result.reason && result.reason.message);
+          }
+        });
+      }
+
+      const settings = await Settings.findOne();
+
+      await handleMiniAppSubmission(
+        bot,
+        parseInt(userId),
+        { plan, days, amount, ...formFields, media: mediaArray },
+        settings
+      );
+    } catch (err) {
+      console.error('❌ submit-listing background error:', err);
+    }
+  })();
 });
 
 // ========== TESTER RESET ==========
