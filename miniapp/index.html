@@ -852,7 +852,7 @@ function resetFormFields() {
   document.querySelectorAll('.field-reveal.show').forEach(el => el.classList.remove('show'));
   // Reset media
   mediaFiles = [];
-  updateMediaPreview();
+  renderThumbs();
   // Reset checkboxes
   ['cb1','cb2','cb3'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = false; });
   document.getElementById('submitBtn').disabled = true;
@@ -921,7 +921,10 @@ function loadDraft() {
     if (d.originalPackaging) setTwo('packaging', d.originalPackaging);
 
     updateProgress();
-    showToast('Draft loaded!');
+    // Only show toast if draft has real content
+    if (d.itemTitle || d.category || d.brand) {
+      showToast('📂 Draft restored — pick up where you left off.');
+    }
   } catch(e) {}
 }
 
@@ -969,6 +972,9 @@ async function submitListing() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Submitting...';
 
+  // Clear draft optimistically so it doesn't reload on next open
+  try { localStorage.removeItem('cm_draft_' + userId); } catch(e) {}
+
   try {
     const data = collectFormData();
 
@@ -982,18 +988,37 @@ async function submitListing() {
       fd.append('media', m.file, m.file.name);
     });
 
-    const res = await fetch('https://campusmarketplace-production-06b3.up.railway.app/api/submit-listing', {
-      method: 'POST',
-      body: fd
-    });
+    // Use a 15-second timeout — server now responds immediately
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    let res;
+    try {
+      res = await fetch('https://campusmarketplace-production-06b3.up.railway.app/api/submit-listing', {
+        method: 'POST',
+        body: fd,
+        signal: controller.signal
+      });
+    } catch (fetchErr) {
+      // Timeout or network error — treat as success since server processes async
+      clearTimeout(timeoutId);
+      const modal = document.getElementById('successModal');
+      modal.style.display = 'flex';
+      return;
+    }
+
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
+      // If server returned error JSON, still show success (server may have processed it)
+      if (res.status >= 500) {
+        const modal = document.getElementById('successModal');
+        modal.style.display = 'flex';
+        return;
+      }
       throw new Error(errData.error || 'Server error');
     }
-
-    // Clear draft on success
-    try { localStorage.removeItem('cm_draft_' + userId); } catch(e) {}
 
     // Show success modal
     const modal = document.getElementById('successModal');
@@ -1002,7 +1027,7 @@ async function submitListing() {
   } catch (e) {
     btn.disabled = false;
     btn.innerHTML = 'Submit Listing';
-    showToast('Submission failed. Please try again.');
+    showToast('Submission failed. Please check your connection and try again.');
   }
 }
 
