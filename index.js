@@ -182,8 +182,27 @@ bot.onText(/^\/start(.*)/, async (msg) => {
   if (param && param.startsWith('verified_')) {
     const verified = await handleVerifyDeepLink(bot, chatId, param);
     if (verified) {
+      // Re-fetch user then go through checkUserReady so WhatsApp step fires if needed
+      // Do NOT call showMainMenu directly here — that caused the triple-message
       const freshUser = await User.findOne({ telegramId: chatId });
-      return await showMainMenu(bot, chatId, freshUser);
+      const ready = await checkUserReady(bot, chatId, freshUser);
+      if (ready) await showMainMenu(bot, chatId, freshUser);
+    }
+    return;
+  }
+
+  // Handle view_[productId] deep link
+  if (param && param.startsWith('view_')) {
+    const productId = param.replace('view_', '');
+    try {
+      const { sendProductCard } = require('./handlers/product');
+      const Settings = require('./models/Settings');
+      const product = await Product.findById(productId);
+      if (!product) return bot.sendMessage(chatId, '❌ Product not found or has been removed.');
+      const settings = await Settings.findOne() || new Settings();
+      await sendProductCard(bot, chatId, product, user, settings);
+    } catch (e) {
+      await bot.sendMessage(chatId, '❌ Could not load product.');
     }
     return;
   }
@@ -272,6 +291,10 @@ bot.on('message', async (msg) => {
     updateSession(chatId, { promoDays: days });
     return await handleProDays(bot, chatId, days, user);
   }
+
+  // ReplyKeyboardMarkup persistent buttons
+  if (text === '🛍️ Buy Used Items') return await handleBuyFlow(bot, chatId, user);
+  if (text === '💰 Sell Used Items') return await startSellFlow(bot, chatId, user);
 
   if (text.startsWith('/')) {
     return bot.sendMessage(chatId, '❌ Unknown command.');
