@@ -43,29 +43,41 @@ async function broadcastProduct(bot, product) {
 
   for (const user of users) {
     try {
-      if (product.media && product.media.length > 0) {
-        if (product.media.length === 1) {
-          const m = product.media[0];
+      const validMedia = (product.media || []).filter(m => m && m.file_id);
+      let mediaSent = false;
+
+      if (validMedia.length === 1) {
+        const m = validMedia[0];
+        try {
           if (m.type === 'video') {
             await bot.sendVideo(user.telegramId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
           } else {
             await bot.sendPhoto(user.telegramId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
           }
-        } else {
-          // Send all media as album — first item gets caption
-          const mediaGroup = product.media.slice(0, 10).map((m, i) => ({
+          mediaSent = true;
+        } catch (mediaErr) {
+          console.error(`Broadcast single media to ${user.telegramId} failed:`, mediaErr.message);
+        }
+      } else if (validMedia.length > 1) {
+        try {
+          const mediaGroup = validMedia.slice(0, 10).map((m, i) => ({
             type: m.type === 'video' ? 'video' : 'photo',
             media: m.file_id,
             ...(i === 0 ? { caption, parse_mode: 'Markdown' } : {})
           }));
           await bot.sendMediaGroup(user.telegramId, mediaGroup);
-          // Separate message for the View Items button
           await bot.sendMessage(user.telegramId, `👆 *${product.name}* — Tap below to view details:`, {
             parse_mode: 'Markdown',
             reply_markup: keyboard
           });
+          mediaSent = true;
+        } catch (mediaErr) {
+          console.error(`Broadcast media group to ${user.telegramId} failed:`, mediaErr.message);
         }
-      } else {
+      }
+
+      // Always guarantee the user gets the notification
+      if (!mediaSent) {
         await bot.sendMessage(user.telegramId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
       }
 
