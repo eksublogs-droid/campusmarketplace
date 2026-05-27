@@ -33,22 +33,6 @@ function proceedPayment() {
   };
 }
 
-function paymentSent(ref) {
-  return {
-    inline_keyboard: [
-      [{ text: '✅ I Have Sent The Money', callback_data: `payment_sent_${ref}` }]
-    ]
-  };
-}
-
-function reverifyPayment(ref) {
-  return {
-    inline_keyboard: [
-      [{ text: '🔄 Reverify Payment', callback_data: `reverify_${ref}` }]
-    ]
-  };
-}
-
 function productActions(productId, waLink, waLinkReady) {
   return {
     inline_keyboard: [
@@ -77,12 +61,10 @@ function submitToAdmin() {
 
 function adminApproveReject(submissionId) {
   return {
-    inline_keyboard: [
-      [
-        { text: '✅ Approve', callback_data: `approve_${submissionId}` },
-        { text: '❌ Reject', callback_data: `reject_${submissionId}` }
-      ]
-    ]
+    inline_keyboard: [[
+      { text: '✅ Approve', callback_data: `approve_${submissionId}` },
+      { text: '❌ Reject', callback_data: `reject_${submissionId}` }
+    ]]
   };
 }
 
@@ -103,20 +85,16 @@ function confirmPost() {
 
 function markAsSoldBtn(productId) {
   return {
-    inline_keyboard: [
-      [{ text: '🔴 Mark as Sold', callback_data: `mark_sold_${productId}` }]
-    ]
+    inline_keyboard: [[{ text: '🔴 Mark as Sold', callback_data: `mark_sold_${productId}` }]]
   };
 }
 
 function confirmSold(productId) {
   return {
-    inline_keyboard: [
-      [
-        { text: '✅ Yes, Delete It', callback_data: `confirm_sold_${productId}` },
-        { text: '❌ Cancel', callback_data: 'cancel_sold' }
-      ]
-    ]
+    inline_keyboard: [[
+      { text: '✅ Yes, Delete It', callback_data: `confirm_sold_${productId}` },
+      { text: '❌ Cancel', callback_data: 'cancel_sold' }
+    ]]
   };
 }
 
@@ -125,8 +103,8 @@ function adminMenu() {
     inline_keyboard: [
       [{ text: '➕ Add Product', callback_data: 'admin_add_product' }],
       [{ text: '📋 Pending Submissions', callback_data: 'admin_pending' }],
+      [{ text: '💰 Pending Payments', callback_data: 'admin_pending_payments' }],
       [{ text: '📦 Active Products', callback_data: 'admin_products' }],
-      [{ text: '📢 Notify Buyer', callback_data: 'admin_notify_buyer' }],
       [{ text: '⚙️ Settings', callback_data: 'admin_settings' }]
     ]
   };
@@ -134,7 +112,7 @@ function adminMenu() {
 
 module.exports = {
   mainMenu, planSelection, proDayOptions, proceedPayment,
-  paymentSent, reverifyPayment, productActions, productPagination,
+  productActions, productPagination,
   submitToAdmin, adminApproveReject, whatsappOrDefault, confirmPost,
   markAsSoldBtn, confirmSold, adminMenu
 };
