@@ -1,9 +1,11 @@
 function mainMenu() {
   return {
-    inline_keyboard: [
-      [{ text: '🛍️ Buy Used Items', callback_data: 'buy' }],
-      [{ text: '💰 Sell Used Items', callback_data: 'sell' }]
-    ]
+    keyboard: [
+      [{ text: '🛍️ Buy Used Items' }],
+      [{ text: '💰 Sell Used Items' }]
+    ],
+    resize_keyboard: true,
+    persistent: true
   };
 }
 
@@ -19,11 +21,14 @@ function planSelection() {
 function proDayOptions() {
   return {
     inline_keyboard: [
-      [{ text: '1 day — ₦1,000',   callback_data: 'prodays_1'  }],
-      [{ text: '3 days — ₦3,000',  callback_data: 'prodays_3'  }],
-      [{ text: '7 days — ₦7,000',  callback_data: 'prodays_7'  }],
-      [{ text: '14 days — ₦14,000',callback_data: 'prodays_14' }],
-      [{ text: '30 days — ₦30,000',callback_data: 'prodays_30' }]
+      [{ text: '1 day — ₦1,000',    callback_data: 'prodays_1'  }],
+      [{ text: '2 days — ₦2,000',   callback_data: 'prodays_2'  }],
+      [{ text: '3 days — ₦3,000',   callback_data: 'prodays_3'  }],
+      [{ text: '5 days — ₦5,000',   callback_data: 'prodays_5'  }],
+      [{ text: '7 days — ₦7,000',   callback_data: 'prodays_7'  }],
+      [{ text: '14 days — ₦14,000', callback_data: 'prodays_14' }],
+      [{ text: '30 days — ₦30,000', callback_data: 'prodays_30' }],
+      [{ text: '✏️ Custom days',     callback_data: 'prodays_custom' }]
     ]
   };
 }
