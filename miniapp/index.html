@@ -362,10 +362,16 @@
 
   <div class="step">
     <div class="step-label">19. Warranty remaining?</div>
-    <div class="step-explain" style="margin-bottom:8px">An active warranty is a major selling point.</div>
-    <div class="two-btns">
-      <div class="tap-btn" id="warr-yes" onclick="setTwo('warranty','yes')">Yes, has warranty</div>
-      <div class="tap-btn" id="warr-no"  onclick="setTwo('warranty','no')">No warranty left</div>
+    <div class="step-explain" style="margin-bottom:8px">An active warranty is a major selling point — it gives buyers extra confidence.</div>
+    <div class="cards" id="warrantyCards">
+      <div class="card" data-val="yes" onclick="selectWarrantyCard('yes', this)">
+        <div class="card-name">✅ Yes, has warranty</div>
+        <div class="card-sub">The item still has an active manufacturer or seller warranty.</div>
+      </div>
+      <div class="card" data-val="no" onclick="selectWarrantyCard('no', this)">
+        <div class="card-name">❌ No warranty left</div>
+        <div class="card-sub">Warranty has expired or was never included.</div>
+      </div>
     </div>
     <div class="field-reveal" id="warrantyField">
       <input type="text" id="warrantyDuration" placeholder="e.g. 5 months, 1 year, valid till Dec 2025" style="margin-top:10px" />
@@ -420,15 +426,28 @@
   </div>
 </div>
 
+<div style="padding:8px 16px 0;font-size:11px;color:#666;text-align:center">
+  💾 <strong>Save Draft</strong> stores your progress on this device — tap it anytime to save and come back later. Your draft loads automatically when you reopen the form.
+</div>
+
 <div class="action-row">
-  <button class="btn btn-outline" id="draftBtn" onclick="saveDraft()">💾 Save Draft</button>
+  <button class="btn btn-outline" id="draftBtn" onclick="saveDraft()" title="Saves your progress so you can continue later. Your draft is stored on this device.">💾 Save Draft</button>
   <button class="btn btn-primary" id="submitBtn" onclick="submitListing()" disabled>Submit Listing</button>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- SUCCESS MODAL -->
+<div id="successModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:24px">
+  <div style="background:#1a1a1a;border-radius:20px;padding:32px 24px;max-width:320px;width:100%">
+    <div style="font-size:52px;margin-bottom:12px">🎉</div>
+    <div style="font-size:20px;font-weight:700;color:#f0f0f0;margin-bottom:8px">Submitted!</div>
+    <div style="font-size:14px;color:#888;margin-bottom:24px;line-height:1.6">Your listing has been submitted for review. We'll notify you on Telegram once it's approved (usually within 24 hours).</div>
+    <button onclick="closeAppAfterSubmit()" style="width:100%;background:#2563eb;color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:600;cursor:pointer">✅ Close & Return to Bot</button>
+  </div>
+</div>
 
 <script src="categories.js"></script>
 <script src="states.js"></script>
+<div class="toast" id="toast"></div>
 <script>
 // ===== STATE =====
 const form = {
@@ -635,15 +654,26 @@ function setTwo(key, val) {
     warranty:  ['warr-yes','warr-no'],
     packaging: ['pkg-yes','pkg-no']
   };
+  // warranty now uses card UI, not tap-btn — skip map for warranty
+  if (key === 'warranty') {
+    form.warrantyRemaining = val;
+    document.getElementById('warrantyField').classList.toggle('show', val === 'yes');
+    updateProgress();
+    return;
+  }
   const [yId, nId] = map[key];
   document.getElementById(yId).classList.toggle('selected', val === 'yes');
   document.getElementById(nId).classList.toggle('selected', val === 'no');
   if (key === 'receipt')   form.receiptAvailable = val;
-  if (key === 'warranty') {
-    form.warrantyRemaining = val;
-    document.getElementById('warrantyField').classList.toggle('show', val === 'yes');
-  }
   if (key === 'packaging') form.originalPackaging = val;
+  updateProgress();
+}
+
+function selectWarrantyCard(val, el) {
+  document.querySelectorAll('#warrantyCards .card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  form.warrantyRemaining = val;
+  document.getElementById('warrantyField').classList.toggle('show', val === 'yes');
   updateProgress();
 }
 
@@ -803,8 +833,30 @@ function saveDraft() {
   try {
     const data = collectFormData();
     localStorage.setItem('cm_draft_' + userId, JSON.stringify(data));
-    showToast('Draft saved!');
+    showToast('✅ Draft saved! Your progress is stored on this device. Next time you open this form, it will automatically reload where you left off.');
   } catch(e) { showToast('Could not save draft.'); }
+}
+
+function resetFormFields() {
+  // Clear all inputs
+  document.querySelectorAll('input[type=text], input[type=number], textarea').forEach(el => { el.value = ''; });
+  // Clear selections
+  document.querySelectorAll('.card.selected, .cat-card.selected, .sub-card.selected, .tap-btn.active').forEach(el => el.classList.remove('selected','active'));
+  // Reset form state
+  Object.keys(form).forEach(k => {
+    if (typeof form[k] === 'boolean' || form[k] === null) form[k] = null;
+    else form[k] = '';
+  });
+  form.negotiable = null; form.doorDropoff = null; form.doorPickup = null;
+  // Hide revealed fields
+  document.querySelectorAll('.field-reveal.show').forEach(el => el.classList.remove('show'));
+  // Reset media
+  mediaFiles = [];
+  updateMediaPreview();
+  // Reset checkboxes
+  ['cb1','cb2','cb3'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = false; });
+  document.getElementById('submitBtn').disabled = true;
+  updateProgress();
 }
 
 function loadDraft() {
@@ -862,7 +914,10 @@ function loadDraft() {
     if (d.doorDropoff !== null && d.doorDropoff !== undefined) setDropoff(d.doorDropoff);
     if (d.doorPickup !== null && d.doorPickup !== undefined) setPickup(d.doorPickup);
     if (d.receiptAvailable) setTwo('receipt', d.receiptAvailable);
-    if (d.warrantyRemaining) setTwo('warranty', d.warrantyRemaining);
+    if (d.warrantyRemaining) {
+      const wEl = document.querySelector(`#warrantyCards .card[data-val="${d.warrantyRemaining}"]`);
+      if (wEl) selectWarrantyCard(d.warrantyRemaining, wEl);
+    }
     if (d.originalPackaging) setTwo('packaging', d.originalPackaging);
 
     updateProgress();
@@ -940,16 +995,22 @@ async function submitListing() {
     // Clear draft on success
     try { localStorage.removeItem('cm_draft_' + userId); } catch(e) {}
 
-    if (window.Telegram && Telegram.WebApp) {
-      Telegram.WebApp.close();
-    } else {
-      showToast('Listing submitted successfully!');
-      btn.innerHTML = '✅ Submitted!';
-    }
+    // Show success modal
+    const modal = document.getElementById('successModal');
+    modal.style.display = 'flex';
+
   } catch (e) {
     btn.disabled = false;
     btn.innerHTML = 'Submit Listing';
     showToast('Submission failed. Please try again.');
+  }
+}
+
+function closeAppAfterSubmit() {
+  if (window.Telegram && Telegram.WebApp) {
+    Telegram.WebApp.close();
+  } else {
+    document.getElementById('successModal').style.display = 'none';
   }
 }
 
