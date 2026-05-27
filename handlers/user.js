@@ -23,17 +23,19 @@ async function handleBuyFlow(bot, chatId, user) {
 // ========== SELL FLOW ==========
 async function startSellFlow(bot, chatId, user) {
   const planMsg =
-    `*🆓 FREE PLAN vs 💎 PRO PLAN*\n\n` +
-    `Feature│Free│Pro (₦1,000/day)\n` +
-    `─────────────────────────────────\n` +
-    `WhatsApp Status│✅│✅\n` +
-    `Telegram Status│✅│✅\n` +
-    `30+ WhatsApp Groups│❌│✅\n` +
-    `Facebook Group 140k│❌│✅\n` +
-    `Telegram Group 5.2k│❌│✅\n` +
-    `First On Listings│❌│✅\n` +
-    `Find Buyer Speed│🐢 Slow│🚀 Fast\n\n` +
-    `💡 Pro sellers find buyers up to *5x faster*!\n` +
+    `💎 *WHY GO PRO?*\n\n` +
+    `🆓 *Free gets you:*\n` +
+    `✅ WhatsApp Status\n` +
+    `✅ Telegram Status\n\n` +
+    `⭐ *Pro gets you EVERYTHING +:*\n` +
+    `✅ WhatsApp Status\n` +
+    `✅ Telegram Status\n` +
+    `✅ 30+ WhatsApp Groups\n` +
+    `✅ Facebook Group 140k\n` +
+    `✅ Telegram Group 5.2k\n` +
+    `✅ First On Listings\n` +
+    `🚀 Find buyers up to *5x faster!*\n\n` +
+    `💰 Just *₦1,000/day*\n\n` +
     `Don't let your item sit for weeks.\n` +
     `Serious sellers choose Pro ⭐`;
 
@@ -95,10 +97,8 @@ async function proceedWithPaymentForPro(bot, chatId, user) {
   const settings = await Settings.findOne() || new Settings();
   const pricePerDay = settings.proPricePerDay || 1000;
 
+  // initiatePayment already sets session to 'awaiting_receipt' — do NOT overwrite it here
   await initiatePayment(bot, chatId, user, days, pricePerDay);
-
-  setSession(chatId, 'awaiting_payment_confirmation');
-  updateSession(chatId, { plan: 'pro', promoDays: days });
 }
 
 // After payment confirmed, start product form
@@ -274,6 +274,54 @@ async function notifyAdminNewSubmission(bot, submission) {
   const notif =
     `🆕 *NEW SELLER SUBMISSION*\n\n` +
     `👤 Name: ${submission.firstName}\n` +
+    `🆔 Username: @${submission.username || 'N/A'}\n` +
+    `🔢 Telegram ID: ${submission.telegramId}\n` +
+    `📧 Gmail: ${submission.gmail}\n\n` +
+    `📦 Product: ${submission.productName}\n` +
+    `📝 Details: ${submission.details}\n` +
+    `📄 Description: ${submission.description}\n` +
+    `📍 Location: ${submission.location}\n` +
+    `💰 Asking: ₦${submission.askingPrice.toLocaleString()}\n` +
+    `💸 Last: ₦${submission.lastPrice.toLocaleString()}\n` +
+    `📱 WhatsApp: ${submission.whatsappNumber}\n` +
+    `📋 Plan: ${submission.plan === 'pro' ? `Pro (${submission.premiumDays} days)` : 'Free'}`;
+
+  await bot.sendMessage(adminId, notif, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '✅ Approve', callback_data: `approve_${submission._id}` },
+          { text: '❌ Reject', callback_data: `reject_${submission._id}` }
+        ]
+      ]
+    }
+  });
+
+  // Send media
+  if (submission.media && submission.media.length > 0) {
+    for (const m of submission.media) {
+      if (m.type === 'video') await bot.sendVideo(adminId, m.file_id);
+      else await bot.sendPhoto(adminId, m.file_id);
+    }
+  }
+}
+
+module.exports = {
+  showMainMenu,
+  handleBuyFlow,
+  startSellFlow,
+  handlePlanSelection,
+  handleProDays,
+  proceedWithPaymentForPro,
+  startProductForm,
+  handleProductFormStep,
+  handleMediaUpload,
+  showProductSummary,
+  submitProductToAdmin,
+  notifyAdminNewSubmission
+};
+
     `🆔 Username: @${submission.username || 'N/A'}\n` +
     `🔢 Telegram ID: ${submission.telegramId}\n` +
     `📧 Gmail: ${submission.gmail}\n\n` +
