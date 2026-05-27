@@ -7,7 +7,7 @@ async function broadcastProduct(bot, product) {
   let successCount = 0;
   let failCount = 0;
 
-  // Build full caption (no price as per spec)
+  // Build caption — no prices shown to buyers (admin sees prices)
   const parts = [];
   parts.push(`🆕 *New Product Available!*\n`);
   parts.push(`📦 *${product.name}*`);
@@ -19,9 +19,10 @@ async function broadcastProduct(bot, product) {
   const loc = [product.city, product.state].filter(Boolean).join(', ') || product.location;
   if (loc) parts.push(`📍 Location : ${loc}`);
 
+  // Layman-friendly delivery descriptions
   const delivery = [];
-  if (product.doorDropoff) delivery.push('Door Dropoff');
-  if (product.doorPickup)  delivery.push('Door Pickup');
+  if (product.doorDropoff) delivery.push('Door Dropoff (seller brings to your door)');
+  if (product.doorPickup)  delivery.push('Door Pickup (you collect from seller)');
   if (delivery.length)    parts.push(`🚚 Delivery : ${delivery.join(' & ')}`);
 
   if (product.receiptAvailable && product.receiptAvailable !== 'no')
@@ -35,28 +36,37 @@ async function broadcastProduct(bot, product) {
 
   const caption = parts.join('\n');
 
-  const viewUrl = `https://t.me/${process.env.BOT_USERNAME}?start=view_${product._id}`;
+  // Use callback_data so clicking "View Items" auto-lists products (no /start redirect)
   const keyboard = {
-    inline_keyboard: [[{ text: '👀 View Item', url: viewUrl }]]
+    inline_keyboard: [[{ text: '👀 View Items', callback_data: 'view_items' }]]
   };
 
   for (const user of users) {
     try {
       if (product.media && product.media.length > 0) {
-        const m = product.media[0];
-        if (m.type === 'video') {
-          await bot.sendVideo(user.telegramId, m.file_id, {
-            caption, parse_mode: 'Markdown', reply_markup: keyboard
-          });
+        if (product.media.length === 1) {
+          const m = product.media[0];
+          if (m.type === 'video') {
+            await bot.sendVideo(user.telegramId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
+          } else {
+            await bot.sendPhoto(user.telegramId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
+          }
         } else {
-          await bot.sendPhoto(user.telegramId, m.file_id, {
-            caption, parse_mode: 'Markdown', reply_markup: keyboard
+          // Send all media as album — first item gets caption
+          const mediaGroup = product.media.slice(0, 10).map((m, i) => ({
+            type: m.type === 'video' ? 'video' : 'photo',
+            media: m.file_id,
+            ...(i === 0 ? { caption, parse_mode: 'Markdown' } : {})
+          }));
+          await bot.sendMediaGroup(user.telegramId, mediaGroup);
+          // Separate message for the View Items button
+          await bot.sendMessage(user.telegramId, `👆 *${product.name}* — Tap below to view details:`, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
           });
         }
       } else {
-        await bot.sendMessage(user.telegramId, caption, {
-          parse_mode: 'Markdown', reply_markup: keyboard
-        });
+        await bot.sendMessage(user.telegramId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
       }
 
       if (user.gmail) {
