@@ -91,37 +91,52 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     `Your listing is now *live* and visible to all buyers. You'll start receiving inquiries on WhatsApp soon!`;
 
   // Send approval message with media as album
-  try {
-    if (submission.media && submission.media.length > 0) {
-      if (submission.media.length === 1) {
-        const m = submission.media[0];
-        if (m.type === 'video') {
-          await bot.sendVideo(submission.telegramId, m.file_id, { caption: approvalMsg, parse_mode: 'Markdown' });
-        } else {
-          await bot.sendPhoto(submission.telegramId, m.file_id, { caption: approvalMsg, parse_mode: 'Markdown' });
-        }
+  const validMedia = (submission.media || []).filter(m => m && m.file_id);
+  let sellerMediaSent = false;
+
+  if (validMedia.length === 1) {
+    const m = validMedia[0];
+    try {
+      if (m.type === 'video') {
+        await bot.sendVideo(submission.telegramId, m.file_id, { caption: approvalMsg, parse_mode: 'Markdown' });
       } else {
-        const mediaGroup = submission.media.slice(0, 10).map((m, i) => ({
-          type: m.type === 'video' ? 'video' : 'photo',
-          media: m.file_id,
-          ...(i === 0 ? { caption: approvalMsg, parse_mode: 'Markdown' } : {})
-        }));
-        await bot.sendMediaGroup(submission.telegramId, mediaGroup);
-        await bot.sendMessage(submission.telegramId,
-          `✅ Your listing is now live! You'll start receiving buyer inquiries on WhatsApp soon.`,
-          { parse_mode: 'Markdown' }
-        );
+        await bot.sendPhoto(submission.telegramId, m.file_id, { caption: approvalMsg, parse_mode: 'Markdown' });
       }
-    } else {
-      await bot.sendMessage(submission.telegramId, approvalMsg, { parse_mode: 'Markdown' });
+      sellerMediaSent = true;
+    } catch (err) {
+      console.error(`Approval single media to seller ${submission.telegramId} failed:`, err.message);
     }
-  } catch (err) {
-    console.error(`Notify seller ${submission.telegramId} failed:`, err.message);
+  } else if (validMedia.length > 1) {
+    try {
+      const mediaGroup = validMedia.slice(0, 10).map((m, i) => ({
+        type: m.type === 'video' ? 'video' : 'photo',
+        media: m.file_id,
+        ...(i === 0 ? { caption: approvalMsg, parse_mode: 'Markdown' } : {})
+      }));
+      await bot.sendMediaGroup(submission.telegramId, mediaGroup);
+      await bot.sendMessage(submission.telegramId,
+        `✅ Your listing is now live! You'll start receiving buyer inquiries on WhatsApp soon.`,
+        { parse_mode: 'Markdown' }
+      );
+      sellerMediaSent = true;
+    } catch (err) {
+      console.error(`Approval media group to seller ${submission.telegramId} failed:`, err.message);
+    }
+  }
+
+  // Always guarantee seller gets the approval notification
+  if (!sellerMediaSent) {
+    try {
+      await bot.sendMessage(submission.telegramId, approvalMsg, { parse_mode: 'Markdown' });
+    } catch (err) {
+      console.error(`Approval text fallback to seller ${submission.telegramId} failed:`, err.message);
+    }
   }
 
   await emailApproved(submission.gmail, submission.firstName, submission.productName, process.env.BOT_USERNAME);
 
-  await broadcastProduct(bot, product);
+  // Fire broadcast in background — do not await, so admin gets instant confirmation
+  broadcastProduct(bot, product).catch(err => console.error('Broadcast error:', err.message));
 
   await bot.sendMessage(adminChatId,
     `✅ *Submission Approved*\n\n` +
