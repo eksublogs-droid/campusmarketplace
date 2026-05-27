@@ -10,18 +10,20 @@ const Product = require('./models/Product');
 // Handlers
 const { askGmail, handleGmailInput, showVerificationStep, handleVerifyDeepLink } = require('./handlers/verification');
 const { showMainMenu, handleBuyFlow, startSellFlow, handlePlanSelection, handleProDays, proceedWithPaymentForPro, startProductForm, handleProductFormStep, handleMediaUpload, submitProductToAdmin } = require('./handlers/user');
-const { handlePaymentSent, handleReverify } = require('./handlers/payment');
+const { initiatePayment, handleReceiptPhoto } = require('./handlers/payment');
 const { showProducts, searchProducts } = require('./handlers/product');
 const {
   showAdminMenu, startAddProduct, handleAdminAddProductStep, handleAdminMediaUpload,
   confirmAdminProductPost, showPendingSubmissions, approveSubmission, rejectSubmission,
-  handleRejectReason, showActiveProducts, markAsSold, confirmSoldProduct,
+  handleRejectReason, showPendingPayments, approveReceipt, startRejectReceipt,
+  handleReceiptRejectReason, reReviewReceipt,
+  showActiveProducts, markAsSold, confirmSoldProduct,
   showSettings, editSettingStep, saveSettingValue
 } = require('./handlers/admin');
 
 // Utils
 const { getSession, setSession, updateSession, clearSession } = require('./utils/session');
-const { checkExpiringProPlans, demoteExpiredProPlans } = require('./utils/cron');
+const { checkExpiringProPlans, demoteExpiredProPlans, deleteOldSoldProducts, deleteOldRejectedReceipts } = require('./utils/cron');
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const app = express();
@@ -89,13 +91,10 @@ bot.onText(/^\/reset$/, async (msg) => {
 bot.onText(/^\/start(.*)/, async (msg) => {
   const chatId = msg.chat.id;
 
-  // FIX: extract param directly from msg.text to avoid leading-space issue
-  // with regex capture groups when Telegram appends deep link params.
   const param = (msg.text || '').replace(/^\/start\s*/, '').trim();
 
   const user = await getOrCreateUser(chatId, msg);
 
-  // Handle deep link for verification
   if (param && param.startsWith('verified_')) {
     const verified = await handleVerifyDeepLink(bot, chatId, param);
     if (verified) {
@@ -105,13 +104,11 @@ bot.onText(/^\/start(.*)/, async (msg) => {
     return;
   }
 
-  // Check if user is admin
   if (isAdmin(chatId)) {
     await showAdminMenu(bot, chatId);
     return;
   }
 
-  // Regular user flow
   const ready = await checkUserReady(bot, chatId, user);
   if (ready) {
     await showMainMenu(bot, chatId, user);
@@ -135,20 +132,23 @@ bot.on('message', async (msg) => {
 
     if (text === '/addproduct') return await startAddProduct(bot, chatId);
     if (text === '/pending') return await showPendingSubmissions(bot, chatId);
+    if (text === '/pending_payments') return await showPendingPayments(bot, chatId);
     if (text === '/products') return await showActiveProducts(bot, chatId);
     if (text === '/settings') return await showSettings(bot, chatId);
 
-    // Admin product add steps
     if (session && session.step && session.step.startsWith('admin_add_product')) {
       return await handleAdminAddProductStep(bot, chatId, text);
     }
 
-    // Admin reject reason
     if (session && session.step === 'admin_reject_reason') {
       return await handleRejectReason(bot, chatId, text);
     }
 
-    // Admin settings edit
+    // Receipt rejection reason
+    if (session && session.step === 'admin_receipt_reject_reason') {
+      return await handleReceiptRejectReason(bot, chatId, text);
+    }
+
     if (session && session.step && session.step.startsWith('settings_edit')) {
       return await saveSettingValue(bot, chatId, text);
     }
@@ -168,17 +168,14 @@ bot.on('message', async (msg) => {
 
   const session = getSession(chatId);
 
-  // Search for products
   if (session && session.step === 'searching') {
     return await searchProducts(bot, chatId, user, text);
   }
 
-  // Sell flow - product form steps
   if (session && session.step && session.step.startsWith('sell_product')) {
     return await handleProductFormStep(bot, chatId, text);
   }
 
-  // Pro custom days
   if (session && session.step === 'select_pro_days_custom') {
     const days = parseInt(text);
     if (isNaN(days) || days <= 0) return bot.sendMessage(chatId, '❌ Enter a valid number of days.');
@@ -186,7 +183,6 @@ bot.on('message', async (msg) => {
     return await handleProDays(bot, chatId, days);
   }
 
-  // Payment - awaiting custom WhatsApp
   if (session && session.step === 'sell_product_whatsapp_custom') {
     return await handleProductFormStep(bot, chatId, text);
   }
@@ -200,19 +196,30 @@ bot.on('message', async (msg) => {
 bot.on('photo', async (msg) => {
   const chatId = msg.chat.id;
   const user = await User.findOne({ telegramId: chatId });
-  if (!user || !user.verified) return;
+  if (!user) return;
 
   const session = getSession(chatId);
-  if (!session) return;
-
   const file_id = msg.photo[msg.photo.length - 1].file_id;
 
-  if (session.step === 'sell_product_media') {
-    return await handleMediaUpload(bot, chatId, file_id, 'photo');
+  // Admin photo uploads (product media)
+  if (isAdmin(chatId)) {
+    if (session && session.step === 'admin_add_product_media') {
+      return await handleAdminMediaUpload(bot, chatId, file_id, 'photo');
+    }
+    return;
   }
 
-  if (session.step === 'admin_add_product_media') {
-    return await handleAdminMediaUpload(bot, chatId, file_id, 'photo');
+  // User must be verified for anything below
+  if (!user.verified) return;
+
+  // Receipt photo
+  if (session && session.step === 'awaiting_receipt') {
+    return await handleReceiptPhoto(bot, chatId, file_id, user);
+  }
+
+  // Product media upload
+  if (session && session.step === 'sell_product_media') {
+    return await handleMediaUpload(bot, chatId, file_id, 'photo');
   }
 });
 
@@ -243,7 +250,6 @@ bot.on('callback_query', async (query) => {
 
   if (!user) return;
 
-  // Admin check
   const adminMode = isAdmin(chatId);
 
   // ===== MAIN MENU =====
@@ -300,22 +306,6 @@ bot.on('callback_query', async (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
-  if (data.startsWith('payment_sent_')) {
-    const ref = data.split('_').slice(2).join('_');
-    await handlePaymentSent(bot, chatId, ref, user, async (tx, days) => {
-      await startProductForm(bot, chatId);
-    });
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  if (data.startsWith('reverify_')) {
-    const ref = data.split('_').slice(1).join('_');
-    await handleReverify(bot, chatId, ref, user, async (tx, days) => {
-      await startProductForm(bot, chatId);
-    });
-    return bot.answerCallbackQuery(query.id);
-  }
-
   if (data === 'wa_default') {
     const session = getSession(chatId);
     if (session && session.step === 'sell_product_whatsapp') {
@@ -350,12 +340,37 @@ bot.on('callback_query', async (query) => {
       return await showPendingSubmissions(bot, chatId);
     }
 
+    if (data === 'admin_pending_payments') {
+      return await showPendingPayments(bot, chatId);
+    }
+
     if (data === 'admin_products') {
       return await showActiveProducts(bot, chatId);
     }
 
     if (data === 'admin_settings') {
       return await showSettings(bot, chatId);
+    }
+
+    // Receipt: approve
+    if (data.startsWith('receipt_approve_')) {
+      const id = data.replace('receipt_approve_', '');
+      await approveReceipt(bot, chatId, id);
+      return bot.answerCallbackQuery(query.id);
+    }
+
+    // Receipt: reject (asks for reason)
+    if (data.startsWith('receipt_reject_')) {
+      const id = data.replace('receipt_reject_', '');
+      await startRejectReceipt(bot, chatId, id);
+      return bot.answerCallbackQuery(query.id);
+    }
+
+    // Receipt: re-review
+    if (data.startsWith('receipt_rereview_')) {
+      const id = data.replace('receipt_rereview_', '');
+      await reReviewReceipt(bot, chatId, id);
+      return bot.answerCallbackQuery(query.id);
     }
 
     if (data.startsWith('approve_')) {
@@ -417,6 +432,20 @@ bot.on('callback_query', async (query) => {
       await editSettingStep(bot, chatId, 'pro_price');
       return bot.answerCallbackQuery(query.id);
     }
+
+    // Bank account edit buttons: settings_bank_0, settings_bank_1, settings_bank_2
+    if (data.startsWith('settings_bank_')) {
+      const idx = data.split('_')[2];
+      await editSettingStep(bot, chatId, `bank_${idx}`);
+      return bot.answerCallbackQuery(query.id);
+    }
+
+    // Bank account toggle buttons: settings_toggle_0, settings_toggle_1, settings_toggle_2
+    if (data.startsWith('settings_toggle_')) {
+      const idx = data.split('_')[2];
+      await editSettingStep(bot, chatId, `toggle_${idx}`);
+      return bot.answerCallbackQuery(query.id);
+    }
   }
 
   bot.answerCallbackQuery(query.id);
@@ -429,16 +458,16 @@ app.listen(PORT, () => {
 });
 
 // ========== CRON JOBS ==========
-// Run expiry checks every 24 hours
 setInterval(async () => {
   await checkExpiringProPlans(bot);
   await demoteExpiredProPlans();
+  await deleteOldSoldProducts();
+  await deleteOldRejectedReceipts();
 }, 24 * 60 * 60 * 1000);
 
-// Run on startup
 setTimeout(async () => {
   await demoteExpiredProPlans();
-}, 10000); // Wait 10 seconds after startup
+}, 10000);
 
 // ========== ERROR HANDLING ==========
 bot.on('polling_error', (error) => {
