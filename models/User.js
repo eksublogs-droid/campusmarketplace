@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema({
   verified:       { type: Boolean, default: false },
   verifyCode:     { type: String, default: '' },
   notifiedAdmin:  { type: Boolean, default: false },
+  telegramLinkOpened: { type: Boolean, default: false },
   registeredAt:   { type: Date, default: Date.now },
   lastSeen:       { type: Date, default: Date.now }
 });
