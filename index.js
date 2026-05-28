@@ -61,10 +61,9 @@ mongoose.connect(process.env.MONGODB_URI).then(() => {
   bot.startPolling();
   console.log('✅ Bot polling started');
 
-  // Set bot menu button to /begin so users always see it
+  // Set bot menu button to /begin only — /start still works for deep links but stays hidden
   bot.setMyCommands([
-    { command: 'begin', description: '🏠 Show main menu' },
-    { command: 'start', description: '▶️ Start / restart' }
+    { command: 'begin', description: '🏠 Show main menu' }
   ]).catch(() => {});
 }).catch(err => {
   console.error('❌ MongoDB error:', err.message);
@@ -640,12 +639,14 @@ bot.on('callback_query', async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
     if (data.startsWith('approve_')) {
+      bot.answerCallbackQuery(query.id).catch(() => {});
       await approveSubmission(bot, chatId, data.split('_')[1]);
-      return bot.answerCallbackQuery(query.id);
+      return;
     }
     if (data.startsWith('reject_')) {
+      bot.answerCallbackQuery(query.id).catch(() => {});
       await rejectSubmission(bot, chatId, data.split('_')[1]);
-      return bot.answerCallbackQuery(query.id);
+      return;
     }
     if (data === 'admin_wa_default') {
       const session = getSession(chatId);
