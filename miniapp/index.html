@@ -374,7 +374,17 @@
       </div>
     </div>
     <div class="field-reveal" id="warrantyField">
-      <input type="text" id="warrantyDuration" placeholder="e.g. 5 months, 1 year, valid till Dec 2025" style="margin-top:10px" />
+      <div class="duration-wrap" style="margin-top:10px">
+        <div class="duration-unit-btns">
+          <div class="tap-btn" id="warr-days"   onclick="setWarrantyUnit('Days')">Days</div>
+          <div class="tap-btn" id="warr-months" onclick="setWarrantyUnit('Months')">Months</div>
+          <div class="tap-btn" id="warr-years"  onclick="setWarrantyUnit('Years')">Years</div>
+        </div>
+        <div class="duration-number-wrap" id="warrantyNumberWrap">
+          <input type="number" id="warrantyNumber" placeholder="Enter number" min="1" oninput="onWarrantyNumberInput()" />
+          <div class="step-tip" id="warrantyTip"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -460,6 +470,7 @@ const form = {
 };
 let mediaFiles = []; // each entry: { dataUrl, type, file, file_id, uploading, uploadFailed }
 let durationUnit = ''; // 'Days','Months','Years'
+let warrantyUnit = ''; // 'Days','Months','Years'
 
 const params = new URLSearchParams(location.search);
 const userId = params.get('userId') || '';
@@ -607,6 +618,31 @@ function onDurationNumberInput() {
   updateProgress();
 }
 
+// ===== WARRANTY UNIT (Days/Months/Years) =====
+function setWarrantyUnit(unit) {
+  warrantyUnit = unit;
+  ['Days','Months','Years'].forEach(u => {
+    document.getElementById('warr-' + u.toLowerCase()).classList.toggle('selected', u === unit);
+  });
+  document.getElementById('warrantyNumberWrap').classList.add('show');
+  document.getElementById('warrantyNumber').value = '';
+  const tips = { Days: 'Enter 1–30', Months: 'Enter 1–12', Years: 'Enter a number (e.g. 2)' };
+  document.getElementById('warrantyTip').textContent = tips[unit];
+  document.getElementById('warrantyNumber').placeholder = tips[unit];
+  form.warrantyDuration = '';
+  updateProgress();
+}
+
+function onWarrantyNumberInput() {
+  const n = parseInt(document.getElementById('warrantyNumber').value);
+  if (!warrantyUnit || isNaN(n) || n <= 0) { form.warrantyDuration = ''; return; }
+  if (warrantyUnit === 'Days' && n > 30) { document.getElementById('warrantyNumber').value = 30; }
+  if (warrantyUnit === 'Months' && n > 12) { document.getElementById('warrantyNumber').value = 12; }
+  const final = parseInt(document.getElementById('warrantyNumber').value);
+  form.warrantyDuration = final + ' ' + warrantyUnit.toLowerCase();
+  updateProgress();
+}
+
 // ===== CARD / BUTTON SELECTORS =====
 function selectCard(field, val, el) {
   el.closest('.cards').querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
@@ -680,6 +716,14 @@ function selectWarrantyCard(val, el) {
   el.classList.add('selected');
   form.warrantyRemaining = val;
   document.getElementById('warrantyField').classList.toggle('show', val === 'yes');
+  // Reset warranty duration if user switches to "no warranty"
+  if (val !== 'yes') {
+    warrantyUnit = '';
+    form.warrantyDuration = '';
+    ['days','months','years'].forEach(u => document.getElementById('warr-' + u).classList.remove('selected'));
+    document.getElementById('warrantyNumberWrap').classList.remove('show');
+    document.getElementById('warrantyNumber').value = '';
+  }
   updateProgress();
 }
 
@@ -890,7 +934,9 @@ function collectFormData() {
     doorPickup: form.doorPickup,
     receiptAvailable: form.receiptAvailable,
     warrantyRemaining: form.warrantyRemaining,
-    warrantyDuration: document.getElementById('warrantyDuration').value.trim(),
+    warrantyDuration: form.warrantyDuration,
+    _warrantyUnit: warrantyUnit,
+    _warrantyNumber: document.getElementById('warrantyNumber') ? document.getElementById('warrantyNumber').value : '',
     originalPackaging: form.originalPackaging,
     plan, days, amount
   };
@@ -942,7 +988,14 @@ function loadDraft() {
     setVal('repairsDetails', d.repairsDetails);
     setVal('reasonForSelling', d.reasonForSelling);
     setVal('city', d.city);
-    setVal('warrantyDuration', d.warrantyDuration);
+    // Restore warranty duration unit/number
+    if (d._warrantyUnit) {
+      setWarrantyUnit(d._warrantyUnit);
+      if (d._warrantyNumber) {
+        document.getElementById('warrantyNumber').value = d._warrantyNumber;
+        onWarrantyNumberInput();
+      }
+    }
 
     if (d.category) {
       form.category = d.category;
