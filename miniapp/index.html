@@ -186,7 +186,7 @@
 </div>
 
 <!-- SECTION 2: PRICING -->
-<div class="section" id="sec2">
+<div class="section" id="sec2" style="display:none">
   <div class="section-title">💰 Section 2 — Pricing</div>
 
   <div class="step">
@@ -221,7 +221,7 @@
 </div>
 
 <!-- SECTION 3: PHOTOS & MEDIA -->
-<div class="section" id="sec3">
+<div class="section" id="sec3" style="display:none">
   <div class="section-title">📸 Section 3 — Photos & Media</div>
   <div class="step">
     <div class="step-label">9. Upload Photos *</div>
@@ -244,7 +244,7 @@
 </div>
 
 <!-- SECTION 4: CONDITION DETAILS -->
-<div class="section" id="sec4">
+<div class="section" id="sec4" style="display:none">
   <div class="section-title">🔍 Section 4 — Item Condition Details</div>
 
   <!-- Duration — compulsory, 3 unit buttons -->
@@ -303,7 +303,7 @@
 </div>
 
 <!-- SECTION 5: LOCATION & DELIVERY -->
-<div class="section" id="sec5">
+<div class="section" id="sec5" style="display:none">
   <div class="section-title">📍 Section 5 — Location & Delivery</div>
 
   <div class="step">
@@ -347,7 +347,7 @@
 </div>
 
 <!-- SECTION 6: VERIFICATION & TRUST -->
-<div class="section" id="sec6">
+<div class="section" id="sec6" style="display:none">
   <div class="section-title">🛡 Section 6 — Verification & Trust</div>
   <div class="step-explain" style="margin-bottom:16px">These questions are optional but help buyers feel more confident. Takes less than 30 seconds.</div>
 
@@ -389,7 +389,7 @@
 </div>
 
 <!-- SECTION 7: REVIEW & SUBMIT -->
-<div class="section" id="sec7">
+<div class="section" id="sec7" style="display:none">
   <div class="section-title">✅ Section 7 — Review & Submit</div>
   <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Make sure everything looks correct before submitting.</p>
   <div id="summaryContainer"></div>
@@ -473,13 +473,19 @@ window.addEventListener('DOMContentLoaded', () => {
     Telegram.WebApp.expand();
     Telegram.WebApp.ready();
   }
-  // Categories are visible first — render immediately
+  // Section 1 is visible immediately — render categories and progress
   buildCategories();
   updateProgress();
-  // Defer non-critical work until after first paint
+  // After first paint: reveal remaining sections + build states + load draft
   requestAnimationFrame(() => {
-    buildStates();
-    setTimeout(() => { loadDraft(); }, 0);
+    requestAnimationFrame(() => {
+      ['sec2','sec3','sec4','sec5','sec6','sec7'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = '';
+      });
+      buildStates();
+      setTimeout(() => { loadDraft(); }, 0);
+    });
   });
 });
 
