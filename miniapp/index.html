@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>List Your Item — Campus Marketplace</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js" defer></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -709,10 +709,37 @@ function handleVideo(input) {
   input.value = '';
 }
 
+function compressImage(file) {
+  return new Promise(resolve => {
+    // Videos — skip compression entirely
+    if (!file.type.startsWith('image/')) { resolve(file); return; }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const MAX = 1280;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else       { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        resolve(blob ? new File([blob], file.name, { type: 'image/jpeg' }) : file);
+      }, 'image/jpeg', 0.82);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 async function silentUpload(entry) {
   try {
+    const fileToSend = await compressImage(entry.file);
     const fd = new FormData();
-    fd.append('file', entry.file, entry.file.name);
+    fd.append('file', fileToSend, entry.file.name);
     const res = await fetch('https://campusmarketplace-production-06b3.up.railway.app/api/upload-media', {
       method: 'POST',
       body: fd
