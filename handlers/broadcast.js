@@ -156,16 +156,22 @@ async function searchProducts(bot, chatId, user, keyword) {
   clearSession(chatId);
 }
 
-// Broadcast a newly approved product to ALL users
-async function broadcastProduct(bot, product) {
+// Broadcast a newly approved product to ALL users except admin and the seller who submitted
+async function broadcastProduct(bot, product, sellerTelegramId) {
   const settings = await getSettings();
   const users = await User.find({});
+
+  const adminId = String(process.env.ADMIN_TELEGRAM_ID || '');
+  const sellerId = sellerTelegramId ? String(sellerTelegramId) : null;
 
   let successCount = 0;
   let failCount = 0;
 
-  // Send "New Product Available!" header once per user
+  // Send "New Product Available!" header once per user, skip admin and seller
   for (const user of users) {
+    const uid = String(user.telegramId);
+    if (uid === adminId) continue;
+    if (sellerId && uid === sellerId) continue;
     try {
       await bot.sendMessage(user.telegramId,
         `🆕 *New Product Available!*\n\nA new item just got listed on Campus Marketplace. Check it out! 👇`,
