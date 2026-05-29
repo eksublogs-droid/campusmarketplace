@@ -660,6 +660,26 @@ bot.on('callback_query', async (query) => {
         doorDropoff: delType === 'dropoff' || delType === 'both',
         doorPickup: delType === 'pickup' || delType === 'both'
       });
+      setSession(chatId, 'admin_add_product_plan');
+      await bot.sendMessage(chatId, '💎 Should this product be listed as *Pro* (pinned)?', {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💎 Yes — Pro Plan', callback_data: 'admin_plan_pro' }],
+            [{ text: '🆓 No — Free Plan', callback_data: 'admin_plan_free' }]
+          ]
+        }
+      });
+      return bot.answerCallbackQuery(query.id);
+    }
+    if (data === 'admin_plan_pro') {
+      updateSession(chatId, { isPremium: true });
+      setSession(chatId, 'admin_add_product_plan_days');
+      await bot.sendMessage(chatId, '📅 How many days should this Pro listing be pinned? (e.g. 7, 14, 30):');
+      return bot.answerCallbackQuery(query.id);
+    }
+    if (data === 'admin_plan_free') {
+      updateSession(chatId, { isPremium: false, premiumDays: 0 });
       setSession(chatId, 'admin_add_product_whatsapp');
       await bot.sendMessage(chatId, '📱 Use default WhatsApp or enter a custom one?', {
         reply_markup: {
