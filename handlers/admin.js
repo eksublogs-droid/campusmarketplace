@@ -336,25 +336,81 @@ async function confirmAdminProductPost(bot, chatId) {
   clearSession(chatId);
 
   const planLabel = d.isPremium ? `Pro (${d.premiumDays} day(s))` : 'Free';
+  const expiryStr = d.isPremium && d.premiumDays
+    ? new Date(Date.now() + d.premiumDays * 24 * 60 * 60 * 1000).toDateString()
+    : 'N/A (Free)';
 
-  await bot.sendMessage(chatId,
-    `✅ *Product Posted!*
+  const deliveryParts = [];
+  if (d.doorDropoff) deliveryParts.push('Door Dropoff (seller brings it to your door)');
+  if (d.doorPickup)  deliveryParts.push('Door Pickup (you pick it up from seller\'s location)');
+  const deliveryText = deliveryParts.length ? deliveryParts.join(' & ') : 'Not specified';
 
-` +
-    `📦 ${d.productName}
-` +
-    `💎 Plan: ${planLabel}
-` +
-    `📢 Broadcasting to all users now...`,
-    { parse_mode: 'Markdown' }
-  );
+  const confirmationMsg =
+    `✅ *Product Posted Successfully!*\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📦 *${d.productName}*\n` +
+    `🗂 Category   : ${d.category || 'N/A'}\n` +
+    `📁 Subcategory: ${d.subcategory || 'N/A'}\n` +
+    `🏷 Brand      : ${d.brand || 'N/A'}\n` +
+    `⚙️ Condition  : ${d.condition || 'N/A'}\n` +
+    `📄 Description: ${d.description || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⏱ Used For   : ${d.usedDuration || 'N/A'}\n` +
+    `🔧 Defects    : ${d.hasDefects ? (d.defectsDetails || 'Yes') : 'None'}\n` +
+    `🛠 Repairs    : ${d.wasRepaired ? (d.repairsDetails || 'Yes') : 'None'}\n` +
+    `❓ Reason     : ${d.reasonForSelling || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📍 State      : ${d.state || 'N/A'}\n` +
+    `🏙 City       : ${d.city || 'N/A'}\n` +
+    `🚚 Delivery   : ${deliveryText}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💵 Orig Price : ₦${(d.originalPrice || 0).toLocaleString()}\n` +
+    `💰 Selling    : ₦${(d.sellingPrice || 0).toLocaleString()}\n` +
+    `🤝 Negotiable : ${d.negotiable ? `Yes (Min: ₦${(d.lowestPrice || 0).toLocaleString()})` : 'No'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💎 Plan       : ${planLabel}\n` +
+    `📅 Expires    : ${expiryStr}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `Your listing is now *live* and visible to all buyers. Broadcasting to all users now! 📢`;
+
+  // Send confirmation with product media (mirrors seller approval notification)
+  const validMedia = (d.productMedia || []).filter(m => m && m.file_id);
+  let mediaSent = false;
+
+  if (validMedia.length === 1) {
+    const m = validMedia[0];
+    try {
+      if (m.type === 'video') {
+        await bot.sendVideo(chatId, m.file_id, { caption: confirmationMsg, parse_mode: 'Markdown' });
+      } else {
+        await bot.sendPhoto(chatId, m.file_id, { caption: confirmationMsg, parse_mode: 'Markdown' });
+      }
+      mediaSent = true;
+    } catch (_) {}
+  } else if (validMedia.length > 1) {
+    try {
+      const mediaGroup = validMedia.slice(0, 10).map((m, i) => ({
+        type: m.type === 'video' ? 'video' : 'photo',
+        media: m.file_id,
+        ...(i === 0 ? { caption: confirmationMsg, parse_mode: 'Markdown' } : {})
+      }));
+      await bot.sendMediaGroup(chatId, mediaGroup);
+      await bot.sendMessage(chatId,
+        `✅ Your listing is now live! Broadcasting to all users now! 📢`,
+        { parse_mode: 'Markdown' }
+      );
+      mediaSent = true;
+    } catch (_) {}
+  }
+
+  if (!mediaSent) {
+    await bot.sendMessage(chatId, confirmationMsg, { parse_mode: 'Markdown' });
+  }
 
   broadcastProduct(bot, product)
     .then(result => {
       bot.sendMessage(chatId,
-        `📢 *Broadcast Complete*
-✅ Sent: ${result.successCount}
-❌ Failed: ${result.failCount}`,
+        `📢 *Broadcast Complete*\n✅ Sent: ${result.successCount}\n❌ Failed: ${result.failCount}`,
         { parse_mode: 'Markdown' }
       ).catch(() => {});
     })
@@ -887,6 +943,139 @@ async function saveSettingValue(bot, chatId, value) {
   }
 }
 
+
+// ========== ADMIN MINI APP POST (from miniapp with isAdmin=true) ==========
+async function handleAdminMiniAppPost(bot, formData, settings) {
+  const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID);
+  const plan = (formData.plan || 'free').toLowerCase();
+  const days = parseInt(formData.days) || 0;
+  const isPremium = plan === 'pro' && days > 0;
+  const premiumExpiresAt = isPremium
+    ? new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+    : null;
+
+  const product = new Product({
+    name:             formData.itemTitle || '',
+    media:            formData.media || [],
+    details:          formData.description || '',
+    description:      formData.description || '',
+    location:         `${formData.city ? formData.city + ', ' : ''}${formData.state || ''}`,
+    whatsappNumber:   process.env.ADMIN_WHATSAPP || '',
+    price:            parseInt(formData.sellingPrice) || 0,
+    category:         formData.category || '',
+    subcategory:      formData.subcategory || '',
+    brand:            formData.brand || '',
+    condition:        formData.condition || '',
+    originalPrice:    parseInt(formData.originalPrice) || 0,
+    sellingPrice:     parseInt(formData.sellingPrice) || 0,
+    negotiable:       formData.negotiable === true || formData.negotiable === 'true',
+    lowestPrice:      parseInt(formData.lowestPrice) || 0,
+    usedDuration:     formData.usedDuration || '',
+    hasDefects:       formData.hasDefects === true || formData.hasDefects === 'true',
+    defectsDetails:   formData.defectsDetails || '',
+    wasRepaired:      formData.wasRepaired === true || formData.wasRepaired === 'true',
+    repairsDetails:   formData.repairsDetails || '',
+    reasonForSelling: formData.reasonForSelling || '',
+    state:            formData.state || '',
+    city:             formData.city || '',
+    doorDropoff:      formData.doorDropoff === true || formData.doorDropoff === 'true',
+    doorPickup:       formData.doorPickup === true || formData.doorPickup === 'true',
+    receiptAvailable: formData.receiptAvailable || '',
+    warrantyRemaining:formData.warrantyRemaining || '',
+    warrantyDuration: formData.warrantyDuration || '',
+    originalPackaging:formData.originalPackaging || '',
+    postedBy:         'admin',
+    isPremium,
+    premiumExpiresAt,
+    isSold:           false
+  });
+
+  await product.save();
+
+  const planLabel = isPremium ? `Pro (${days} day(s))` : 'Free';
+  const expiryStr = isPremium ? premiumExpiresAt.toDateString() : 'N/A (Free)';
+
+  const deliveryParts = [];
+  if (product.doorDropoff) deliveryParts.push('Door Dropoff (seller brings it to your door)');
+  if (product.doorPickup)  deliveryParts.push('Door Pickup (you pick it up from seller\'s location)');
+  const deliveryText = deliveryParts.length ? deliveryParts.join(' & ') : 'Not specified';
+
+  const confirmationMsg =
+    `✅ *Product Posted Successfully!*\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📦 *${product.name}*\n` +
+    `🗂 Category   : ${product.category || 'N/A'}\n` +
+    `📁 Subcategory: ${product.subcategory || 'N/A'}\n` +
+    `🏷 Brand      : ${product.brand || 'N/A'}\n` +
+    `⚙️ Condition  : ${product.condition || 'N/A'}\n` +
+    `📄 Description: ${product.description || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⏱ Used For   : ${product.usedDuration || 'N/A'}\n` +
+    `🔧 Defects    : ${product.hasDefects ? (product.defectsDetails || 'Yes') : 'None'}\n` +
+    `🛠 Repairs    : ${product.wasRepaired ? (product.repairsDetails || 'Yes') : 'None'}\n` +
+    `❓ Reason     : ${product.reasonForSelling || 'N/A'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📍 State      : ${product.state || 'N/A'}\n` +
+    `🏙 City       : ${product.city || 'N/A'}\n` +
+    `🚚 Delivery   : ${deliveryText}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💵 Orig Price : ₦${(product.originalPrice || 0).toLocaleString()}\n` +
+    `💰 Selling    : ₦${(product.sellingPrice || 0).toLocaleString()}\n` +
+    `🤝 Negotiable : ${product.negotiable ? `Yes (Min: ₦${(product.lowestPrice || 0).toLocaleString()})` : 'No'}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💎 Plan       : ${planLabel}\n` +
+    `📅 Expires    : ${expiryStr}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `Your listing is now *live* and visible to all buyers. Broadcasting to all users now! 📢`;
+
+  // Send confirmation to admin with media (same as seller approval notification)
+  const validMedia = (product.media || []).filter(m => m && m.file_id);
+  let mediaSent = false;
+
+  if (validMedia.length === 1) {
+    const m = validMedia[0];
+    try {
+      if (m.type === 'video') {
+        await bot.sendVideo(adminId, m.file_id, { caption: confirmationMsg, parse_mode: 'Markdown' });
+      } else {
+        await bot.sendPhoto(adminId, m.file_id, { caption: confirmationMsg, parse_mode: 'Markdown' });
+      }
+      mediaSent = true;
+    } catch (_) {}
+  } else if (validMedia.length > 1) {
+    try {
+      const mediaGroup = validMedia.slice(0, 10).map((m, i) => ({
+        type: m.type === 'video' ? 'video' : 'photo',
+        media: m.file_id,
+        ...(i === 0 ? { caption: confirmationMsg, parse_mode: 'Markdown' } : {})
+      }));
+      await bot.sendMediaGroup(adminId, mediaGroup);
+      await bot.sendMessage(adminId,
+        `✅ Your listing is now live! Broadcasting to all users now! 📢`,
+        { parse_mode: 'Markdown' }
+      );
+      mediaSent = true;
+    } catch (_) {}
+  }
+
+  if (!mediaSent) {
+    await bot.sendMessage(adminId, confirmationMsg, { parse_mode: 'Markdown' });
+  }
+
+  // Broadcast to all users
+  broadcastProduct(bot, product)
+    .then(result => {
+      bot.sendMessage(adminId,
+        `📢 *Broadcast Complete*\n✅ Sent: ${result.successCount}\n❌ Failed: ${result.failCount}`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    })
+    .catch(err => {
+      console.error('Broadcast error (admin miniapp post):', err.message);
+      bot.sendMessage(adminId, `⚠️ Broadcast error: ${err.message}`).catch(() => {});
+    });
+}
+
 module.exports = {
   showAdminMenu,
   startAddProduct,
@@ -909,5 +1098,6 @@ module.exports = {
   showSettings,
   editSettingStep,
   saveSettingValue,
-  showPaidAds
+  showPaidAds,
+  handleAdminMiniAppPost
 };
