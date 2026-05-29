@@ -186,17 +186,22 @@ async function showPendingSubmissions(bot, chatId) {
   }
 }
 
-async function approveSubmission(bot, chatId, submissionId) {
-  await approveSellerSubmission(bot, submissionId, chatId);
+async function approveSubmission(bot, chatId, submissionId, adminMsgId) {
+  await approveSellerSubmission(bot, submissionId, chatId, adminMsgId);
   await showAdminMenu(bot, chatId);
 }
 
-async function rejectSubmission(bot, chatId, submissionId) {
+async function rejectSubmission(bot, chatId, submissionId, adminMsgId) {
   const submission = await SellerSubmission.findById(submissionId);
   if (!submission) return bot.sendMessage(chatId, '❌ Submission not found.');
 
+  // Guard: prevent double-action
+  if (submission.approvalStatus !== 'pending') {
+    return bot.sendMessage(chatId, `⚠️ This submission was already ${submission.approvalStatus}.`);
+  }
+
   setSession(chatId, 'admin_reject_reason');
-  updateSession(chatId, { rejectSubmissionId: submissionId });
+  updateSession(chatId, { rejectSubmissionId: submissionId, rejectAdminMsgId: adminMsgId });
 
   await bot.sendMessage(chatId, `Enter rejection reason for "${submission.productName}":`);
 }
@@ -204,8 +209,9 @@ async function rejectSubmission(bot, chatId, submissionId) {
 async function handleRejectReason(bot, chatId, reason) {
   const session = getSession(chatId);
   const submissionId = session.data.rejectSubmissionId;
+  const adminMsgId   = session.data.rejectAdminMsgId || null;
 
-  await rejectSellerSubmission(bot, submissionId, chatId, reason);
+  await rejectSellerSubmission(bot, submissionId, chatId, reason, adminMsgId);
 
   clearSession(chatId);
   await showAdminMenu(bot, chatId);
@@ -247,7 +253,7 @@ async function showPendingPayments(bot, chatId) {
  * Admin taps Approve on a receipt.
  * Updates DB, notifies user, opens product form for them.
  */
-async function approveReceipt(bot, adminChatId, receiptId) {
+async function approveReceipt(bot, adminChatId, receiptId, adminReceiptMsgId) {
   const receipt = await PaymentReceipt.findById(receiptId);
   if (!receipt) return bot.sendMessage(adminChatId, '❌ Receipt not found.');
 
@@ -256,12 +262,23 @@ async function approveReceipt(bot, adminChatId, receiptId) {
   }
 
   // Capture all needed fields before deleting
-  const { telegramId, firstName, username, amountExpected, days } = receipt;
+  const { telegramId, firstName, username, amountExpected, days, receiptReceivedMsgId } = receipt;
+  const adminMsgToDelete = adminReceiptMsgId || receipt.adminReceiptMsgId;
 
   // Delete immediately — job done
   await PaymentReceipt.findByIdAndDelete(receiptId);
 
-  await bot.sendMessage(adminChatId, `✅ Approved! ₦${amountExpected.toLocaleString()} for @${username || firstName}.`);
+  // Delete the admin's NEW PAYMENT RECEIPT message after 2s
+  if (adminMsgToDelete) {
+    setTimeout(() => {
+      bot.deleteMessage(adminChatId, adminMsgToDelete).catch(() => {});
+    }, 2000);
+  }
+
+  // Delete the "✅ Receipt received!" message shown to the user
+  if (receiptReceivedMsgId) {
+    try { await bot.deleteMessage(telegramId, receiptReceivedMsgId); } catch (_) {}
+  }
 
   // Notify user + open product form
   const user = await require('../models/User').findOne({ telegramId });
@@ -269,11 +286,9 @@ async function approveReceipt(bot, adminChatId, receiptId) {
 
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-  try {
-    await emailPaymentConfirmed(user.gmail, user.firstName, amountExpected, days, expiresAt);
-  } catch (e) {
-    console.error('Email error on receipt approval:', e.message);
-  }
+  // Fire email async — never block user notification
+  emailPaymentConfirmed(user.gmail, user.firstName, amountExpected, days, expiresAt)
+    .catch(e => console.error('Email error on receipt approval:', e.message));
 
   await bot.sendMessage(telegramId,
     `✅ *Payment Approved!*\n\n` +
@@ -299,7 +314,7 @@ async function approveReceipt(bot, adminChatId, receiptId) {
  * Admin taps Reject on a receipt.
  * Asks admin to type a reason, then informs user.
  */
-async function startRejectReceipt(bot, adminChatId, receiptId) {
+async function startRejectReceipt(bot, adminChatId, receiptId, adminReceiptMsgId) {
   const receipt = await PaymentReceipt.findById(receiptId);
   if (!receipt) return bot.sendMessage(adminChatId, '❌ Receipt not found.');
 
@@ -308,7 +323,10 @@ async function startRejectReceipt(bot, adminChatId, receiptId) {
   }
 
   setSession(adminChatId, 'admin_receipt_reject_reason');
-  updateSession(adminChatId, { rejectReceiptId: receiptId.toString() });
+  updateSession(adminChatId, {
+    rejectReceiptId: receiptId.toString(),
+    rejectReceiptAdminMsgId: adminReceiptMsgId || receipt.adminReceiptMsgId || null
+  });
 
   await bot.sendMessage(adminChatId,
     `Type the rejection reason for @${receipt.username || receipt.firstName}'s receipt:\n` +
@@ -327,7 +345,13 @@ async function handleReceiptRejectReason(bot, adminChatId, reason) {
   }
 
   // Capture fields before deleting
-  const { telegramId, amountExpected } = receipt;
+  const { telegramId, amountExpected, receiptReceivedMsgId } = receipt;
+  const adminMsgToDelete = session.data.rejectReceiptAdminMsgId || receipt.adminReceiptMsgId || null;
+
+  // Delete "✅ Receipt received!" from user's chat
+  if (receiptReceivedMsgId) {
+    try { await bot.deleteMessage(telegramId, receiptReceivedMsgId); } catch (_) {}
+  }
 
   // Keep record for 48hrs in case of re-review, mark as rejected
   receipt.status = 'rejected';
@@ -336,8 +360,18 @@ async function handleReceiptRejectReason(bot, adminChatId, reason) {
   await receipt.save();
   // Cron will auto-delete this after 48 hours
 
+  // Delete the admin's NEW PAYMENT RECEIPT message after 2s
+  if (adminMsgToDelete) {
+    setTimeout(() => {
+      bot.deleteMessage(adminChatId, adminMsgToDelete).catch(() => {});
+    }, 2000);
+  }
+
   clearSession(adminChatId);
-  await bot.sendMessage(adminChatId, `❌ Rejected. Reason sent to user.`);
+  const rejectConfirmMsg = await bot.sendMessage(adminChatId, `❌ Rejected. Reason sent to user.`);
+  setTimeout(() => {
+    bot.deleteMessage(adminChatId, rejectConfirmMsg.message_id).catch(() => {});
+  }, 2000);
 
   // Notify user with reason
   await bot.sendMessage(telegramId,
