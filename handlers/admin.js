@@ -212,6 +212,22 @@ async function handleAdminAddProductStep(bot, chatId, text) {
       updateSession(chatId, { productWhatsapp: text });
       await showAdminProductSummary(bot, chatId);
       return;
+
+    case 'admin_add_product_plan_days': {
+      const days = parseInt(text.replace(/[^0-9]/g, ''));
+      if (isNaN(days) || days < 1) return bot.sendMessage(chatId, '❌ Enter a valid number of days (e.g. 7, 14, 30).');
+      updateSession(chatId, { premiumDays: days });
+      setSession(chatId, 'admin_add_product_whatsapp');
+      await bot.sendMessage(chatId, '📱 Use default WhatsApp or enter a custom one?', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: 'Use Default', callback_data: 'admin_wa_default' }],
+            [{ text: 'Type Custom', callback_data: 'admin_wa_custom' }]
+          ]
+        }
+      });
+      return;
+    }
   }
 }
 
@@ -261,7 +277,7 @@ async function showAdminProductSummary(bot, chatId) {
     `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `📸 Media     : ${(d.productMedia || []).length} file(s)\n` +
     `📱 WhatsApp  : ${d.productWhatsapp || 'Default'}\n` +
-    `💎 Plan      : Free (Admin post)`;
+    `💎 Plan      : ${d.isPremium ? `Pro (${d.premiumDays || 0} day(s))` : 'Free (Admin post)'}`;
 
   await bot.sendMessage(chatId, summary, {
     parse_mode: 'Markdown',
@@ -310,17 +326,43 @@ async function confirmAdminProductPost(bot, chatId) {
     warrantyDuration: d.warrantyDuration || '',
     originalPackaging: d.originalPackaging || '',
     postedBy: 'admin',
-    isPremium: false
+    isPremium: d.isPremium || false,
+    premiumExpiresAt: d.isPremium && d.premiumDays
+      ? new Date(Date.now() + d.premiumDays * 24 * 60 * 60 * 1000)
+      : null
   });
 
   await product.save();
   clearSession(chatId);
 
-  await bot.sendMessage(chatId, '✅ Product posted! Broadcasting to all users...');
-  const result = await broadcastProduct(bot, product);
+  const planLabel = d.isPremium ? `Pro (${d.premiumDays} day(s))` : 'Free';
+
   await bot.sendMessage(chatId,
-    `📢 Broadcast complete!\n\n✅ Sent: ${result.successCount}\n❌ Failed: ${result.failCount}`
+    `✅ *Product Posted!*
+
+` +
+    `📦 ${d.productName}
+` +
+    `💎 Plan: ${planLabel}
+` +
+    `📢 Broadcasting to all users now...`,
+    { parse_mode: 'Markdown' }
   );
+
+  broadcastProduct(bot, product)
+    .then(result => {
+      bot.sendMessage(chatId,
+        `📢 *Broadcast Complete*
+✅ Sent: ${result.successCount}
+❌ Failed: ${result.failCount}`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    })
+    .catch(err => {
+      console.error('Broadcast error (admin post):', err.message);
+      bot.sendMessage(chatId, `⚠️ Broadcast encountered an error: ${err.message}`).catch(() => {});
+    });
+
   await showAdminMenu(bot, chatId);
 }
 
@@ -471,23 +513,13 @@ async function approveReceipt(bot, adminChatId, receiptId, adminReceiptMsgId) {
   );
   setTimeout(() => { bot.deleteMessage(adminChatId, approveConfirmMsg.message_id).catch(() => {}); }, 3000);
 
-  // Notify user — clean message, no CTA text
+  // Notify user — clean message, no buttons
   await bot.sendMessage(telegramId,
     `✅ *Payment Approved!*\n\n` +
     `₦${amountExpected.toLocaleString()} confirmed for *${days} day(s)* Pro.`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [[{
-          text: '📋 Open Listing Form',
-          web_app: { url: `https://eksublogs-droid.github.io/campusmarketplace/miniapp/?userId=${telegramId}&plan=pro&days=${days}&amount=${amountExpected}` }
-        }]]
-      }
-    }
+    { parse_mode: 'Markdown' }
   );
 
-  setSession(telegramId, 'awaiting_miniapp');
-  updateSession(telegramId, { plan: 'pro', promoDays: days });
 }
 
 // ========== REJECT RECEIPT ==========
