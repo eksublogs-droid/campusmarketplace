@@ -110,6 +110,7 @@ function adminMenu() {
       [{ text: '➕ Add Product', callback_data: 'admin_add_product' }],
       [{ text: '📋 Pending Submissions', callback_data: 'admin_pending' }],
       [{ text: '💰 Pending Payments', callback_data: 'admin_pending_payments' }],
+      [{ text: '💎 Paid Ads & Users', callback_data: 'admin_paid_ads' }],
       [{ text: '📦 Active Products', callback_data: 'admin_products' }],
       [{ text: '⚙️ Settings', callback_data: 'admin_settings' }]
     ]
