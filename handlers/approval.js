@@ -2,15 +2,29 @@ const Product = require('../models/Product');
 const SellerSubmission = require('../models/SellerSubmission');
 const { emailApproved, emailRejected } = require('../utils/email');
 const { broadcastProduct } = require('./broadcast');
+const { deleteMsgs } = require('./product');
 
-async function approveSellerSubmission(bot, submissionId, adminChatId) {
+async function approveSellerSubmission(bot, submissionId, adminChatId, adminSubmissionMsgId) {
   const submission = await SellerSubmission.findById(submissionId);
   if (!submission) {
     return bot.sendMessage(adminChatId, '❌ Submission not found.');
   }
 
+  // Guard: prevent double-action
+  if (submission.approvalStatus !== 'pending') {
+    return bot.sendMessage(adminChatId, `⚠️ This submission was already ${submission.approvalStatus}.`);
+  }
+
   submission.approvalStatus = 'approved';
   await submission.save();
+
+  // Delete the 🆕 NEW SELLER SUBMISSION admin message after 2s
+  const msgToDelete = adminSubmissionMsgId || submission.adminSubmissionMsgId;
+  if (msgToDelete) {
+    setTimeout(() => {
+      bot.deleteMessage(adminChatId, msgToDelete).catch(() => {});
+    }, 2000);
+  }
 
   let premiumExpiresAt = null;
   if (submission.plan === 'pro' && submission.premiumDays > 0) {
@@ -59,7 +73,6 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     ? (submission.warrantyDuration || 'Yes')
     : (submission.warrantyRemaining || 'N/A');
 
-  // Delivery descriptions in layman terms
   const deliveryParts = [];
   if (submission.doorDropoff) deliveryParts.push('Door Dropoff (seller brings it to your door)');
   if (submission.doorPickup)  deliveryParts.push('Door Pickup (you pick it up from seller\'s location)');
@@ -90,7 +103,12 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     `━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `Your listing is now *live* and visible to all buyers. You'll start receiving inquiries on WhatsApp soon!`;
 
-  // Send approval message with media as album
+  // Delete the seller's final status message (✅ Listing Submitted! or ✅ Receipt received!)
+  if (submission.finalStatusMsgId) {
+    try { await bot.deleteMessage(submission.telegramId, submission.finalStatusMsgId); } catch (_) {}
+  }
+
+  // Send approval message to seller
   const validMedia = (submission.media || []).filter(m => m && m.file_id);
   let sellerMediaSent = false;
 
@@ -124,7 +142,6 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     }
   }
 
-  // Always guarantee seller gets the approval notification
   if (!sellerMediaSent) {
     try {
       await bot.sendMessage(submission.telegramId, approvalMsg, { parse_mode: 'Markdown' });
@@ -133,9 +150,11 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     }
   }
 
-  await emailApproved(submission.gmail, submission.firstName, submission.productName, process.env.BOT_USERNAME);
+  // Email seller — do NOT await, fire and forget so it never blocks admin confirmation
+  emailApproved(submission.gmail, submission.firstName, submission.productName, process.env.BOT_USERNAME)
+    .catch(err => console.error('emailApproved error:', err.message));
 
-  // Send admin confirmation FIRST — always, before broadcast
+  // Send admin confirmation IMMEDIATELY (not blocked by email)
   try {
     await bot.sendMessage(adminChatId,
       `✅ *Submission Approved*\n\n` +
@@ -149,7 +168,7 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     console.error('Admin approval confirmation failed:', err.message);
   }
 
-  // Fire broadcast in background — never await, never crash the flow
+  // Broadcast in background
   broadcastProduct(bot, product, submission.telegramId)
     .then(result => {
       bot.sendMessage(adminChatId,
@@ -163,16 +182,35 @@ async function approveSellerSubmission(bot, submissionId, adminChatId) {
     });
 }
 
-async function rejectSellerSubmission(bot, submissionId, adminChatId, reason) {
+async function rejectSellerSubmission(bot, submissionId, adminChatId, reason, adminSubmissionMsgId) {
   const submission = await SellerSubmission.findById(submissionId);
   if (!submission) {
     return bot.sendMessage(adminChatId, '❌ Submission not found.');
+  }
+
+  // Guard: prevent double-action
+  if (submission.approvalStatus !== 'pending') {
+    return bot.sendMessage(adminChatId, `⚠️ This submission was already ${submission.approvalStatus}.`);
   }
 
   submission.approvalStatus = 'rejected';
   submission.rejectionReason = reason;
   await submission.save();
 
+  // Delete the 🆕 NEW SELLER SUBMISSION admin message after 2s
+  const msgToDelete = adminSubmissionMsgId || submission.adminSubmissionMsgId;
+  if (msgToDelete) {
+    setTimeout(() => {
+      bot.deleteMessage(adminChatId, msgToDelete).catch(() => {});
+    }, 2000);
+  }
+
+  // Delete the seller's final status message (✅ Listing Submitted! or ✅ Receipt received!)
+  if (submission.finalStatusMsgId) {
+    try { await bot.deleteMessage(submission.telegramId, submission.finalStatusMsgId); } catch (_) {}
+  }
+
+  // Notify seller
   try {
     await bot.sendMessage(submission.telegramId,
       `❌ *Your product was not approved*\n\n` +
@@ -185,8 +223,11 @@ async function rejectSellerSubmission(bot, submissionId, adminChatId, reason) {
     console.error(`Notify seller ${submission.telegramId} failed:`, err.message);
   }
 
-  await emailRejected(submission.gmail, submission.firstName, submission.productName, reason);
+  // Email seller — fire and forget so admin confirmation is instant
+  emailRejected(submission.gmail, submission.firstName, submission.productName, reason)
+    .catch(err => console.error('emailRejected error:', err.message));
 
+  // Admin confirmation — sent immediately
   try {
     await bot.sendMessage(adminChatId,
       `❌ *Submission Rejected*\n\n` +
