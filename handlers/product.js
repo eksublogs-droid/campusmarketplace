@@ -1,7 +1,7 @@
 const Product = require('../models/Product');
 const Settings = require('../models/Settings');
 const User = require('../models/User');
-const { buyerInterestedLink } = require('../utils/whatsapp');
+const { buyerInterestedLink, enquirePriceLink } = require('../utils/whatsapp');
 const { productPagination } = require('../utils/keyboard');
 const { emailBuyerInterest } = require('../utils/email');
 const { setSession, clearSession } = require('../utils/session');
@@ -25,8 +25,11 @@ async function deleteMsgs(bot, chatId, msgIds) {
 
 async function sendProductCard(bot, chatId, product, user, settings) {
   const waNum = settings.defaultWhatsapp;
+  // Full-detail WhatsApp links
   const waLink      = buyerInterestedLink(waNum, product, user, false);
   const waLinkReady = buyerInterestedLink(waNum, product, user, true);
+  const waEnquire   = enquirePriceLink(waNum, product, user, false);
+  const waEnquireReady = enquirePriceLink(waNum, product, user, true);
 
   const badge = product.isPremium ? '💎 PRO  |  ' : '';
 
@@ -65,11 +68,12 @@ async function sendProductCard(bot, chatId, product, user, settings) {
   const keyboard = {
     inline_keyboard: [
       [{ text: '👀 Interested — Not Ready to Buy', url: waLink }],
-      [{ text: '✅ Interested & Ready to Buy',      url: waLinkReady }]
+      [{ text: '✅ Interested & Ready to Buy',      url: waLinkReady }],
+      [{ text: '🔍 Enquire Price',                  url: waEnquire }],
+      [{ text: '💸 Ready to Buy — Enquire Price',   url: waEnquireReady }]
     ]
   };
 
-  // Returns array of message_ids sent for this card (used for buy-flow cleanup)
   const sent = [];
 
   if (product.media && product.media.length > 0) {
@@ -109,12 +113,6 @@ async function sendProductCard(bot, chatId, product, user, settings) {
   return sent;
 }
 
-// -----------------------------------------------------------------------
-// showProducts
-//   prevMsgIds: array of ALL message IDs from the previous buy listing
-//               (header + all cards + pagination). Deleted before new page renders.
-//   Returns { headerMsgId, cardMsgIds, paginationMsgId }
-// -----------------------------------------------------------------------
 async function showProducts(bot, chatId, user, page = 0, prevMsgIds = []) {
   const settings = await getSettings();
   const now = new Date();
@@ -125,7 +123,6 @@ async function showProducts(bot, chatId, user, page = 0, prevMsgIds = []) {
     ...products.filter(p => !p.isPremium || !p.premiumExpiresAt || p.premiumExpiresAt <= now)
   ];
 
-  // Delete ALL previous buy listing messages immediately
   await deleteMsgs(bot, chatId, prevMsgIds);
 
   if (sorted.length === 0) {
