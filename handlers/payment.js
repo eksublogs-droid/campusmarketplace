@@ -1,6 +1,8 @@
 const Settings = require('../models/Settings');
 const PaymentReceipt = require('../models/PaymentReceipt');
+const SellerSubmission = require('../models/SellerSubmission');
 const { setSession, updateSession, getSession, clearSession } = require('../utils/session');
+const { deleteMsgs } = require('./product');
 
 async function initiatePayment(bot, chatId, user, days, pricePerDay) {
   const amount = days * pricePerDay;
@@ -35,7 +37,6 @@ async function initiatePayment(bot, chatId, user, days, pricePerDay) {
   );
 
   setSession(chatId, 'awaiting_receipt');
-  // Use BOTH key-name conventions so handleReceiptPhoto always finds them
   updateSession(chatId, { paymentDays: days, paymentAmount: amount, promoDays: days, proAmount: amount });
 }
 
@@ -43,10 +44,9 @@ async function handleReceiptPhoto(bot, chatId, fileId, user) {
   const session = getSession(chatId);
   if (!session || session.step !== 'awaiting_receipt') return;
 
-  // Support both key-name conventions (direct payment flow uses paymentDays/paymentAmount,
-  // miniapp submission flow stores promoDays/proAmount)
   const paymentDays   = session.data.paymentDays   || session.data.promoDays   || 0;
   const paymentAmount = session.data.paymentAmount  || session.data.proAmount   || 0;
+  const submissionId  = session.data.submissionId   || null;
 
   const receipt = new PaymentReceipt({
     telegramId:     user.telegramId,
@@ -55,18 +55,46 @@ async function handleReceiptPhoto(bot, chatId, fileId, user) {
     amountExpected: paymentAmount,
     days:           paymentDays,
     receiptFileId:  fileId,
+    submissionId:   submissionId,
     status:         'pending'
   });
   await receipt.save();
 
-  await bot.sendMessage(chatId,
+  // Collect all messages to delete:
+  // - all receipt photo messages the user sent
+  // - proSummaryMsgId (already deleted in handleMiniAppSubmission but kept as safety)
+  // - formReceivedMsgId (the "Form Received! Now Complete Payment" message)
+  const msgIdsToDelete = [
+    ...(session.data.receiptPhotoMsgIds || []),
+    session.data.proSummaryMsgId,
+    session.data.formReceivedMsgId
+  ].filter(Boolean);
+
+  // Send "Receipt received!" confirmation first
+  const receiptReceivedMsg = await bot.sendMessage(chatId,
     `✅ *Receipt received!*\n\n` +
     `Your payment of ₦${paymentAmount.toLocaleString()} is pending admin approval.\n` +
     `You'll be notified once it's confirmed.`,
     { parse_mode: 'Markdown' }
   );
 
+  // Delete all the tracked flow messages
+  await deleteMsgs(bot, chatId, msgIdsToDelete);
+
   clearSession(chatId);
+
+  // Store receiptReceivedMsgId so approveReceipt can delete it
+  receipt.receiptReceivedMsgId = receiptReceivedMsg.message_id;
+  await receipt.save();
+
+  // Also store on the submission record so approval.js can delete it
+  if (submissionId) {
+    try {
+      await SellerSubmission.findByIdAndUpdate(submissionId, {
+        finalStatusMsgId: receiptReceivedMsg.message_id
+      });
+    } catch (_) {}
+  }
 
   await notifyAdminNewReceipt(bot, receipt);
 }
@@ -84,7 +112,7 @@ async function notifyAdminNewReceipt(bot, receipt) {
     `📅 Days: ${receipt.days}\n` +
     `🕐 Submitted: ${receipt.submittedAt.toLocaleString('en-NG')}`;
 
-  await bot.sendPhoto(adminId, receipt.receiptFileId, {
+  const sentMsg = await bot.sendPhoto(adminId, receipt.receiptFileId, {
     caption,
     parse_mode: 'Markdown',
     reply_markup: {
@@ -94,6 +122,12 @@ async function notifyAdminNewReceipt(bot, receipt) {
       ]]
     }
   });
+
+  // Store admin receipt msg ID for deletion on action
+  if (sentMsg) {
+    receipt.adminReceiptMsgId = sentMsg.message_id;
+    await receipt.save();
+  }
 }
 
 module.exports = { initiatePayment, handleReceiptPhoto, notifyAdminNewReceipt };
