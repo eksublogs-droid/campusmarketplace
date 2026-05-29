@@ -5,9 +5,6 @@ function buildWhatsappLink(number, message) {
 
 function buildFullProductMessage(product, user, readyToBuy) {
   const status = readyToBuy ? "I'm READY TO BUY" : "I'm interested but not ready to buy yet";
-  const neg = product.negotiable
-    ? `Yes (Min: ₦${(product.lowestPrice || 0).toLocaleString()})`
-    : 'No';
 
   const lines = [
     `Hi! I saw this item on CampusMarketplace Telegram bot.`,
@@ -19,9 +16,6 @@ function buildFullProductMessage(product, user, readyToBuy) {
     `🏷 Brand     : ${product.brand || 'N/A'}`,
     `⚙️ Condition : ${product.condition || 'N/A'}`,
     `📄 Desc      : ${product.description || product.details || 'N/A'}`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `💰 Price     : ₦${(product.sellingPrice || product.price || 0).toLocaleString()}`,
-    `🤝 Negotiable: ${neg}`,
     `━━━━━━━━━━━━━━━━━━━━━━━━━`,
     `⏱ Used For  : ${product.usedDuration || 'N/A'}`,
     `🔧 Defects   : ${product.hasDefects ? (product.defectsDetails || 'Yes') : 'None'}`,
@@ -55,7 +49,6 @@ function buyerInterestedLink(adminWhatsapp, product, user, readyToBuy) {
 }
 
 function enquirePriceLink(adminWhatsapp, product, user, readyToBuy) {
-  // Same as buyerInterestedLink — full details with enquire context
   const status = readyToBuy ? "I'm READY TO BUY and want to enquire the price" : "I want to enquire the price";
   const msg = buildFullProductMessage(product, user, readyToBuy).replace(
     /💬 Status:.*/,
