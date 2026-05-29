@@ -14,15 +14,22 @@ async function getSettings() {
   return s;
 }
 
+// Helper: delete a batch of message IDs silently
+async function deleteMsgs(bot, chatId, msgIds) {
+  for (const id of (msgIds || [])) {
+    if (id) {
+      try { await bot.deleteMessage(chatId, id); } catch (_) {}
+    }
+  }
+}
+
 async function sendProductCard(bot, chatId, product, user, settings) {
-  // Always use admin default WhatsApp, not the product's stored number
   const waNum = settings.defaultWhatsapp;
   const waLink      = buyerInterestedLink(waNum, product, user, false);
   const waLinkReady = buyerInterestedLink(waNum, product, user, true);
 
   const badge = product.isPremium ? '💎 PRO  |  ' : '';
 
-  // Build full caption
   const lines = [];
   lines.push(`${badge}📦 *${product.name}*`);
   if (product.category)   lines.push(`🗂 Category : ${product.category}${product.subcategory ? ' › ' + product.subcategory : ''}`);
@@ -62,40 +69,53 @@ async function sendProductCard(bot, chatId, product, user, settings) {
     ]
   };
 
+  // Returns array of message_ids sent for this card (used for buy-flow cleanup)
+  const sent = [];
+
   if (product.media && product.media.length > 0) {
     try {
       if (product.media.length === 1) {
-        // Single media: attach caption + buttons directly
         const m = product.media[0];
+        let msg;
         if (m.type === 'video') {
-          await bot.sendVideo(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
+          msg = await bot.sendVideo(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
         } else {
-          await bot.sendPhoto(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
+          msg = await bot.sendPhoto(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
         }
+        if (msg) sent.push(msg.message_id);
       } else {
-        // Multiple media: send as album first, then caption+buttons as text
         const mediaGroup = product.media.slice(0, 10).map((m, i) => ({
           type: m.type === 'video' ? 'video' : 'photo',
           media: m.file_id,
           ...(i === 0 ? { caption, parse_mode: 'Markdown' } : {})
         }));
-        await bot.sendMediaGroup(chatId, mediaGroup);
-        // Send buttons as follow-up text
-        await bot.sendMessage(chatId, `👆 *${product.name}*\nTap a button below to contact the seller:`, {
+        const msgs = await bot.sendMediaGroup(chatId, mediaGroup);
+        if (msgs) msgs.forEach(m => sent.push(m.message_id));
+        const btnMsg = await bot.sendMessage(chatId, `👆 *${product.name}*\nTap a button below to contact the seller:`, {
           parse_mode: 'Markdown',
           reply_markup: keyboard
         });
+        if (btnMsg) sent.push(btnMsg.message_id);
       }
     } catch (err) {
-      // Fallback to text-only if media fails
-      await bot.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
+      const msg = await bot.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
+      if (msg) sent.push(msg.message_id);
     }
   } else {
-    await bot.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
+    const msg = await bot.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
+    if (msg) sent.push(msg.message_id);
   }
+
+  return sent;
 }
 
-async function showProducts(bot, chatId, user, page = 0) {
+// -----------------------------------------------------------------------
+// showProducts
+//   prevMsgIds: array of ALL message IDs from the previous buy listing
+//               (header + all cards + pagination). Deleted before new page renders.
+//   Returns { headerMsgId, cardMsgIds, paginationMsgId }
+// -----------------------------------------------------------------------
+async function showProducts(bot, chatId, user, page = 0, prevMsgIds = []) {
   const settings = await getSettings();
   const now = new Date();
 
@@ -105,26 +125,38 @@ async function showProducts(bot, chatId, user, page = 0) {
     ...products.filter(p => !p.isPremium || !p.premiumExpiresAt || p.premiumExpiresAt <= now)
   ];
 
+  // Delete ALL previous buy listing messages immediately
+  await deleteMsgs(bot, chatId, prevMsgIds);
+
   if (sorted.length === 0) {
-    return bot.sendMessage(chatId, '📭 No products listed yet. Check back soon!', {
+    await bot.sendMessage(chatId, '📭 No products listed yet. Check back soon!', {
       reply_markup: { inline_keyboard: [[{ text: '🏠 Main Menu', callback_data: 'main_menu' }]] }
     });
+    return null;
   }
 
   const paginated = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  await bot.sendMessage(chatId,
+  const headerMsg = await bot.sendMessage(chatId,
     `🛍️ *Available Items* (${sorted.length} total) — Page ${page + 1}`,
     { parse_mode: 'Markdown' }
   );
 
+  const cardMsgIds = [];
   for (const product of paginated) {
-    await sendProductCard(bot, chatId, product, user, settings);
+    const ids = await sendProductCard(bot, chatId, product, user, settings);
+    cardMsgIds.push(...ids);
   }
 
-  await bot.sendMessage(chatId, 'Navigate or search below:', {
+  const paginationMsg = await bot.sendMessage(chatId, 'Navigate or search below:', {
     reply_markup: productPagination(page, sorted.length)
   });
+
+  return {
+    headerMsgId:    headerMsg.message_id,
+    cardMsgIds,
+    paginationMsgId: paginationMsg.message_id
+  };
 }
 
 async function searchProducts(bot, chatId, user, keyword) {
@@ -149,4 +181,4 @@ async function searchProducts(bot, chatId, user, keyword) {
   clearSession(chatId);
 }
 
-module.exports = { showProducts, searchProducts, sendProductCard };
+module.exports = { showProducts, searchProducts, sendProductCard, deleteMsgs };
