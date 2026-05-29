@@ -396,13 +396,17 @@ bot.on('message', async (msg) => {
   if (session && session.step === 'select_pro_days_custom') {
     const days = parseInt(text);
     if (isNaN(days) || days <= 0) return bot.sendMessage(chatId, '❌ Enter a valid number of days.');
-    updateSession(chatId, { promoDays: days });
+    // Store user reply msg id so handleProDays can include it in sell flow deletions
+    updateSession(chatId, { promoDays: days, customDaysUserMsgId: msg.message_id });
     return await handleProDays(bot, chatId, days, user);
   }
 
   // ReplyKeyboardMarkup persistent buttons
   if (text === '🛍️ Buy Used Items') return await handleBuyFlow(bot, chatId, user);
-  if (text === '💰 Sell Used Items') return await startSellFlow(bot, chatId, user);
+  if (text === '💰 Sell Used Items') {
+    await startSellFlow(bot, chatId, user, msg.message_id);
+    return;
+  }
 
   if (text.startsWith('/')) {
     return bot.sendMessage(chatId, '❌ Unknown command.');
@@ -517,6 +521,10 @@ bot.on('photo', async (msg) => {
   if (!user.verified) return;
 
   if (session && session.step === 'awaiting_receipt') {
+    // Accumulate message IDs of all receipt photos sent (user may send multiple)
+    const existingIds = session.data.receiptPhotoMsgIds || [];
+    existingIds.push(msg.message_id);
+    updateSession(chatId, { receiptPhotoMsgIds: existingIds });
     return await handleReceiptPhoto(bot, chatId, file_id, user);
   }
 });
@@ -580,7 +588,15 @@ bot.on('callback_query', async (query) => {
 
   if (data.startsWith('page_')) {
     const page = parseInt(data.split('_')[1]);
-    return await showProducts(bot, chatId, user, page);
+    const sess = getSession(chatId);
+    const prevMsgIds = (sess && sess.data && sess.data.buyAllMsgIds) || [];
+    const result = await showProducts(bot, chatId, user, page, prevMsgIds);
+    if (result) {
+      const allMsgIds = [result.headerMsgId, ...result.cardMsgIds, result.paginationMsgId];
+      setSession(chatId, 'browsing');
+      updateSession(chatId, { buyAllMsgIds: allMsgIds });
+    }
+    return bot.answerCallbackQuery(query.id);
   }
 
   if (data === 'search') {
@@ -588,7 +604,7 @@ bot.on('callback_query', async (query) => {
     return bot.sendMessage(chatId, '🔍 What are you looking for?');
   }
 
-  if (data === 'sell') return await startSellFlow(bot, chatId, user);
+  if (data === 'sell') return await startSellFlow(bot, chatId, user, null);
 
   if (data === 'plan_free') {
     await handlePlanSelection(bot, chatId, 'free', user);
@@ -604,7 +620,8 @@ bot.on('callback_query', async (query) => {
     const daysStr = data.split('_')[1];
     if (daysStr === 'custom') {
       setSession(chatId, 'select_pro_days_custom');
-      bot.sendMessage(chatId, 'How many days? (type a number):');
+      const customPromptMsg = await bot.sendMessage(chatId, 'How many days? (type a number):');
+      updateSession(chatId, { customDaysBotMsgId: customPromptMsg.message_id });
       return bot.answerCallbackQuery(query.id);
     }
     const days = parseInt(daysStr);
@@ -614,7 +631,14 @@ bot.on('callback_query', async (query) => {
 
   // View items — auto list products without /start
   if (data === 'view_items') {
-    await showProducts(bot, chatId, user, 0);
+    const sess = getSession(chatId);
+    const prevMsgIds = (sess && sess.data && sess.data.buyAllMsgIds) || [];
+    const result = await showProducts(bot, chatId, user, 0, prevMsgIds);
+    if (result) {
+      const allMsgIds = [result.headerMsgId, ...result.cardMsgIds, result.paginationMsgId];
+      setSession(chatId, 'browsing');
+      updateSession(chatId, { buyAllMsgIds: allMsgIds });
+    }
     return bot.answerCallbackQuery(query.id);
   }
 
@@ -627,11 +651,11 @@ bot.on('callback_query', async (query) => {
     if (data === 'admin_settings') return await showSettings(bot, chatId);
 
     if (data.startsWith('receipt_approve_')) {
-      await approveReceipt(bot, chatId, data.replace('receipt_approve_', ''));
+      await approveReceipt(bot, chatId, data.replace('receipt_approve_', ''), query.message.message_id);
       return bot.answerCallbackQuery(query.id);
     }
     if (data.startsWith('receipt_reject_')) {
-      await startRejectReceipt(bot, chatId, data.replace('receipt_reject_', ''));
+      await startRejectReceipt(bot, chatId, data.replace('receipt_reject_', ''), query.message.message_id);
       return bot.answerCallbackQuery(query.id);
     }
     if (data.startsWith('receipt_rereview_')) {
@@ -640,12 +664,12 @@ bot.on('callback_query', async (query) => {
     }
     if (data.startsWith('approve_')) {
       bot.answerCallbackQuery(query.id).catch(() => {});
-      await approveSubmission(bot, chatId, data.split('_')[1]);
+      await approveSubmission(bot, chatId, data.split('_')[1], query.message.message_id);
       return;
     }
     if (data.startsWith('reject_')) {
       bot.answerCallbackQuery(query.id).catch(() => {});
-      await rejectSubmission(bot, chatId, data.split('_')[1]);
+      await rejectSubmission(bot, chatId, data.split('_')[1], query.message.message_id);
       return;
     }
     if (data === 'admin_wa_default') {
