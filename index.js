@@ -30,7 +30,8 @@ const {
   handleReceiptRejectReason, reReviewReceipt,
   showActiveProducts, markAsSold, confirmSoldProduct,
   showSettings, editSettingStep, saveSettingValue,
-  showPaidAds
+  showPaidAds,
+  handleAdminMiniAppPost
 } = require('./handlers/admin');
 
 // Utils
@@ -204,11 +205,16 @@ app.post('/api/submit-listing', upload.array('media', 15), async (req, res) => {
           if (result.status === 'fulfilled') mediaArray.push(result.value);
         });
       }
-      await handleMiniAppSubmission(
-        bot, parseInt(userId),
-        { plan, days, amount, ...formFields, media: mediaArray },
-        settings
-      );
+      const isAdminPost = req.body.isAdmin === 'true';
+      if (isAdminPost && String(userId) === String(process.env.ADMIN_TELEGRAM_ID)) {
+        await handleAdminMiniAppPost(bot, { plan, days, amount, ...formFields, media: mediaArray }, settings);
+      } else {
+        await handleMiniAppSubmission(
+          bot, parseInt(userId),
+          { plan, days, amount, ...formFields, media: mediaArray },
+          settings
+        );
+      }
     } catch (err) {
       console.error('❌ submit-listing background error:', err);
     }
@@ -326,7 +332,20 @@ bot.on('message', async (msg) => {
   if (isAdmin(chatId)) {
     if (text === '/menu') return await showAdminMenu(bot, chatId);
     const session = getSession(chatId);
-    if (text === '/addproduct') return await startAddProduct(bot, chatId);
+    if (text === '/addproduct') {
+      const miniAppUrl = `https://eksublogs-droid.github.io/campusmarketplace/miniapp/?userId=${chatId}&isAdmin=true`;
+      return bot.sendMessage(chatId,
+        `📦 *Add New Product*\n\nTap below to open the listing form.`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📋 Open Listing Form', web_app: { url: miniAppUrl } }]
+            ]
+          }
+        }
+      );
+    }
     if (text === '/pending') return await showPendingSubmissions(bot, chatId);
     if (text === '/pending_payments') return await showPendingPayments(bot, chatId);
     if (text === '/products') return await showActiveProducts(bot, chatId);
@@ -582,7 +601,22 @@ bot.on('callback_query', async (query) => {
 
   if (adminMode) {
     if (data === 'admin_menu') { await showAdminMenu(bot, chatId); return bot.answerCallbackQuery(query.id); }
-    if (data === 'admin_add_product') { await startAddProduct(bot, chatId); return bot.answerCallbackQuery(query.id); }
+    if (data === 'admin_add_product') {
+      const miniAppUrl = `https://eksublogs-droid.github.io/campusmarketplace/miniapp/?userId=${chatId}&isAdmin=true`;
+      await bot.sendMessage(chatId,
+        `📦 *Add New Product*\n\nTap below to open the listing form. You can set it as a Pro (pinned) listing inside the form.`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📋 Open Listing Form', web_app: { url: miniAppUrl } }],
+              [{ text: '🔙 Back', callback_data: 'admin_menu' }]
+            ]
+          }
+        }
+      );
+      return bot.answerCallbackQuery(query.id);
+    }
     if (data === 'admin_pending') { await showPendingSubmissions(bot, chatId); return bot.answerCallbackQuery(query.id); }
     if (data === 'admin_pending_payments') { await showPendingPayments(bot, chatId); return bot.answerCallbackQuery(query.id); }
     if (data === 'admin_paid_ads') { await showPaidAds(bot, chatId); return bot.answerCallbackQuery(query.id); }
