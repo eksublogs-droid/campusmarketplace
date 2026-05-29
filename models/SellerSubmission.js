@@ -11,7 +11,6 @@ const sellerSubmissionSchema = new mongoose.Schema({
   details:          { type: String, default: '' },
   description:      { type: String, default: '' },
   location:         { type: String, default: '' },
-  // New fields — replaces askingPrice / lastPrice
   category:         { type: String, default: '' },
   subcategory:      { type: String, default: '' },
   brand:            { type: String, default: '' },
@@ -44,7 +43,20 @@ const sellerSubmissionSchema = new mongoose.Schema({
   paymentRef:       { type: String, default: '' },
   approvalStatus:   { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   rejectionReason:  { type: String, default: '' },
-  submittedAt:      { type: Date, default: Date.now }
+  submittedAt:      { type: Date, default: Date.now },
+
+  // ------------------------------------------------------------------
+  // Message IDs stored so we can clean up the seller's chat on approval/rejection
+  // sellFlowMsgIds: all msgs from "💰 Sell Used Items" up to (not including)
+  //   the final status msg (✅ Listing Submitted! or ✅ Receipt received!)
+  // finalStatusMsgId: the last msg shown to seller before admin acts
+  //   free plan → ✅ Listing Submitted!
+  //   pro plan  → ✅ Receipt received!
+  // adminSubmissionMsgId: the 🆕 NEW SELLER SUBMISSION message sent to admin
+  // ------------------------------------------------------------------
+  sellFlowMsgIds:       { type: [Number], default: [] },
+  finalStatusMsgId:     { type: Number, default: null },
+  adminSubmissionMsgId: { type: Number, default: null }
 });
 
 module.exports = mongoose.models['SellerSubmission'] || mongoose.model('SellerSubmission', sellerSubmissionSchema);
