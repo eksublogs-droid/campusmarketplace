@@ -23,18 +23,19 @@ async function deleteMsgs(bot, chatId, msgIds) {
   }
 }
 
-async function sendProductCard(bot, chatId, product, user, settings) {
+async function sendProductCard(bot, chatId, product, user, settings, itemNumber) {
   const waNum = settings.defaultWhatsapp;
-  // Full-detail WhatsApp links
-  const waLink      = buyerInterestedLink(waNum, product, user, false);
-  const waLinkReady = buyerInterestedLink(waNum, product, user, true);
-  const waEnquire   = enquirePriceLink(waNum, product, user, false);
+  // All four buttons use same full-detail message (no price), only status line differs
+  const waLink         = buyerInterestedLink(waNum, product, user, false);
+  const waLinkReady    = buyerInterestedLink(waNum, product, user, true);
+  const waEnquire      = enquirePriceLink(waNum, product, user, false);
   const waEnquireReady = enquirePriceLink(waNum, product, user, true);
 
   const badge = product.isPremium ? '💎 PRO  |  ' : '';
+  const numLabel = itemNumber ? `*Item ${itemNumber}*\n` : '';
 
   const lines = [];
-  lines.push(`${badge}📦 *${product.name}*`);
+  lines.push(`${numLabel}${badge}📦 *${product.name}*`);
   if (product.category)   lines.push(`🗂 Category : ${product.category}${product.subcategory ? ' › ' + product.subcategory : ''}`);
   if (product.brand)      lines.push(`🏷 Brand    : ${product.brand}`);
   if (product.condition)  lines.push(`⚙️ Condition: ${product.condition}`);
@@ -77,9 +78,11 @@ async function sendProductCard(bot, chatId, product, user, settings) {
   const sent = [];
 
   if (product.media && product.media.length > 0) {
-    try {
-      if (product.media.length === 1) {
-        const m = product.media[0];
+    const validMedia = product.media.filter(m => m && m.file_id);
+
+    if (validMedia.length === 1) {
+      const m = validMedia[0];
+      try {
         let msg;
         if (m.type === 'video') {
           msg = await bot.sendVideo(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
@@ -87,21 +90,29 @@ async function sendProductCard(bot, chatId, product, user, settings) {
           msg = await bot.sendPhoto(chatId, m.file_id, { caption, parse_mode: 'Markdown', reply_markup: keyboard });
         }
         if (msg) sent.push(msg.message_id);
-      } else {
-        const mediaGroup = product.media.slice(0, 10).map((m, i) => ({
+      } catch (err) {
+        // Fallback to text
+        const msg = await bot.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
+        if (msg) sent.push(msg.message_id);
+      }
+    } else if (validMedia.length > 1) {
+      try {
+        const mediaGroup = validMedia.slice(0, 10).map((m, i) => ({
           type: m.type === 'video' ? 'video' : 'photo',
           media: m.file_id,
           ...(i === 0 ? { caption, parse_mode: 'Markdown' } : {})
         }));
         const msgs = await bot.sendMediaGroup(chatId, mediaGroup);
         if (msgs) msgs.forEach(m => sent.push(m.message_id));
-        const btnMsg = await bot.sendMessage(chatId, `👆 *${product.name}*\nTap a button below to contact the seller:`, {
-          parse_mode: 'Markdown',
-          reply_markup: keyboard
-        });
-        if (btnMsg) sent.push(btnMsg.message_id);
-      }
-    } catch (err) {
+      } catch (_) {}
+      // Always send buttons message after media group
+      const btnMsg = await bot.sendMessage(chatId,
+        `${itemNumber ? `Item ${itemNumber} — ` : ''}👆 *${product.name}* — tap a button below to contact the seller:`,
+        { parse_mode: 'Markdown', reply_markup: keyboard }
+      );
+      if (btnMsg) sent.push(btnMsg.message_id);
+    } else {
+      // No valid media, text only
       const msg = await bot.sendMessage(chatId, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
       if (msg) sent.push(msg.message_id);
     }
@@ -133,6 +144,7 @@ async function showProducts(bot, chatId, user, page = 0, prevMsgIds = []) {
   }
 
   const paginated = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const startIndex = page * PAGE_SIZE; // for item numbering across pages
 
   const headerMsg = await bot.sendMessage(chatId,
     `🛍️ *Available Items* (${sorted.length} total) — Page ${page + 1}`,
@@ -140,8 +152,9 @@ async function showProducts(bot, chatId, user, page = 0, prevMsgIds = []) {
   );
 
   const cardMsgIds = [];
-  for (const product of paginated) {
-    const ids = await sendProductCard(bot, chatId, product, user, settings);
+  for (let i = 0; i < paginated.length; i++) {
+    const itemNumber = startIndex + i + 1;
+    const ids = await sendProductCard(bot, chatId, paginated[i], user, settings, itemNumber);
     cardMsgIds.push(...ids);
   }
 
@@ -172,8 +185,8 @@ async function searchProducts(bot, chatId, user, keyword) {
   }
 
   await bot.sendMessage(chatId, `🔍 Found *${products.length}* result(s) for "*${keyword}*"`, { parse_mode: 'Markdown' });
-  for (const product of products) {
-    await sendProductCard(bot, chatId, product, user, settings);
+  for (let i = 0; i < products.length; i++) {
+    await sendProductCard(bot, chatId, products[i], user, settings, i + 1);
   }
   clearSession(chatId);
 }
